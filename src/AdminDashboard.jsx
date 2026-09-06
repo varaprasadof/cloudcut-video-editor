@@ -47,7 +47,7 @@ export default function AdminDashboard({ onBack }) {
     }
   };
 
-  // Approve a pending UTR request and upgrade user to PRO
+  // Approve a pending UTR request and upgrade user to PRO safely
   const handleApproveUtr = async (paymentId, userId) => {
     setUpdatingId(paymentId);
     try {
@@ -58,7 +58,8 @@ export default function AdminDashboard({ onBack }) {
 
       if (payError) throw payError;
 
-      if (userId) {
+      // Safely check if userId is valid before updating the profiles table
+      if (userId && userId !== 'null' && userId !== '' && userId !== undefined) {
         const { error: profileError } = await supabase
           .from('profiles')
           .update({ plan: 'PRO' })
