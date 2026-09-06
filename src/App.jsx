@@ -82,10 +82,11 @@ export default function App() {
   const [selectedLayerId, setSelectedLayerId] = useState(null);
   const [selectedOverlayType, setSelectedOverlayType] = useState(null);
 
-  // Export State
+  // Export State & Tiered Resolution
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportFormat, setExportFormat] = useState('mp4');
+  const [exportResolution, setExportResolution] = useState('720p'); // '720p', '1080p', '2k'
 
   // Dragging & Scrubbing
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -706,7 +707,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `CloudCut_${isPro ? '2K_PRO' : '720p'}_${Date.now()}.${extension}`;
+      a.download = `CloudCut_${exportResolution}_${Date.now()}.${extension}`;
       a.click();
       window.URL.revokeObjectURL(url);
       setIsExporting(false);
@@ -725,7 +726,6 @@ export default function App() {
       setExportProgress(simulatedProgress);
     }, 200);
 
-    // Automatically complete export based on total timeline duration in milliseconds
     const totalDurationMs = (totalDuration || 5) * 1000;
     setTimeout(() => {
       clearInterval(exportInterval);
@@ -839,6 +839,24 @@ export default function App() {
             </button>
           )}
 
+          {/* Tiered Export Resolution Selector */}
+          <select
+            value={exportResolution}
+            onChange={(e) => {
+              const val = e.target.value;
+              if ((val === '1080p' || val === '2k') && !isPro) {
+                handleUpgradePro();
+              } else {
+                setExportResolution(val);
+              }
+            }}
+            className="bg-[#101115] text-xs font-semibold text-gray-300 border border-gray-800 rounded-lg px-2.5 py-1 focus:outline-none cursor-pointer"
+          >
+            <option value="720p">720p HD (Free)</option>
+            <option value="1080p">1080p Full HD {isPro ? '' : '🔒 (PRO)'}</option>
+            <option value="2k">2K Cinematic {isPro ? '' : '🔒 (PRO)'}</option>
+          </select>
+
           {/* Export Format Selector */}
           <div className="flex bg-[#101115] p-0.5 rounded-lg border border-gray-800 text-[10px] font-bold">
             <button onClick={() => setExportFormat('mp4')} className={`px-2 py-0.5 rounded ${exportFormat === 'mp4' ? 'bg-indigo-600 text-white' : 'text-gray-400'}`}>MP4</button>
@@ -850,7 +868,7 @@ export default function App() {
             disabled={isExporting || !clips.length}
             className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1 text-xs font-bold text-white hover:bg-indigo-500 shadow-sm shadow-indigo-600/20 disabled:opacity-40"
           >
-            <Download size={14} /> {isExporting ? `Exporting (${exportProgress}%)` : isPro ? `Export 2K ${exportFormat.toUpperCase()}` : `Export 720p`}
+            <Download size={14} /> {isExporting ? `Exporting (${exportProgress}%)` : `Export ${exportResolution}`}
           </button>
           <div className="h-4 w-[1px] bg-gray-700" />
           <button onClick={handleLogout} className="p-1 text-gray-400 hover:text-white"><LogOut size={16} /></button>
