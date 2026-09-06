@@ -124,12 +124,14 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (userId, userEmail) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+ const fetchProfile = async (userId, userEmail) => {
+    // Check if profile already exists
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     
     if (data) {
       setProfile(data);
     } else {
+      // Automatically create the profile for new users!
       const isAdmin = userEmail === 'varaprasadn8499@gmail.com';
       const newProfile = {
         id: userId,
@@ -139,7 +141,8 @@ export default function App() {
         edits_count: 0
       };
       
-      await supabase.from('profiles').insert([newProfile]);
+      // Upsert ensures it creates the row safely without crashing
+      await supabase.from('profiles').upsert([newProfile]);
       setProfile(newProfile);
     }
   };
