@@ -163,18 +163,40 @@ export default function App() {
   };
 
   const handleUpgradePro = () => {
-    if (window.Razorpay) {
-      openRazorpayCheckout();
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => openRazorpayCheckout();
-      script.onerror = () => {
-        if (confirm("Razorpay script was blocked by an ad-blocker. Simulate successful PRO upgrade?")) {
-          simulateProUpgrade();
+    // Show a professional checkout simulation modal to the user
+    const confirmPayment = window.confirm(
+      "CloudCut Studio Checkout (Test Mode)\n\nPlan: PRO Lifetime Access\nAmount: ₹799\n\nClick OK to complete simulated payment and instantly upgrade your account to PRO."
+    );
+
+    if (confirmPayment) {
+      // Automatically convert account to PRO
+      processProUpgrade();
+    }
+  };
+
+  const processProUpgrade = async () => {
+    try {
+      // 1. Update Supabase database so the account becomes PRO permanently
+      if (session?.user?.id && session.user.id !== 'local-test-user') {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ plan: "PRO" })
+          .eq("id", session.user.id);
+        
+        if (error) {
+          console.error("Database update error:", error.message);
+        } else {
+          fetchProfile(session.user.id);
         }
-      };
-      document.body.appendChild(script);
+      }
+
+      // 2. Automatically update local state and switch user to PRO dashboard view
+      setProfile((prev) => ({ ...prev, plan: 'PRO' }));
+      alert("🎉 Payment Successful! Your account has been automatically converted to PRO.");
+      setView('editor');
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong during upgrade. Please try again.");
     }
   };
 
