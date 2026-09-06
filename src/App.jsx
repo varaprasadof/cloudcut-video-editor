@@ -663,7 +663,7 @@ export default function App() {
     return `${mins.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
   };
 
-  // Safe Client-Side Exporter with Progress Guarantee
+  // Safe Client-Side Exporter with Guaranteed Timeout Completion
   const startClientSideExport = () => {
     if (!canvasRef.current || !videoRef.current) return;
 
@@ -721,20 +721,21 @@ export default function App() {
 
     let simulatedProgress = 5;
     const exportInterval = setInterval(() => {
-      simulatedProgress = Math.min(98, simulatedProgress + 3);
+      simulatedProgress = Math.min(99, simulatedProgress + 4);
       setExportProgress(simulatedProgress);
+    }, 200);
 
-      if (!videoRef.current || videoRef.current.ended || currentTime >= totalDuration - 0.2) {
-        clearInterval(exportInterval);
-        setExportProgress(100);
-        setTimeout(() => {
-          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
-          }
-          if (videoRef.current) videoRef.current.pause();
-        }, 500);
+    // Automatically complete export based on total timeline duration in milliseconds
+    const totalDurationMs = (totalDuration || 5) * 1000;
+    setTimeout(() => {
+      clearInterval(exportInterval);
+      setExportProgress(100);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
       }
-    }, 300);
+      if (videoRef.current) videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
+    }, totalDurationMs + 500);
   };
 
   if (!session) {
