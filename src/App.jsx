@@ -162,40 +162,43 @@ export default function App() {
     setView('home');
   };
 
-  // Manual UPI UTR Direct Verification Flow
+  // Two-Step Manual UTR Submission for Admin Approval
   const handleUpgradePro = () => {
     const utrNumber = window.prompt(
-      "CloudCut Studio Direct UPI Checkout\n\n1. Pay ₹799 to UPI ID: yourname@paytm\n2. Enter your 12-digit UPI Transaction Reference ID (UTR) below to instantly activate PRO:"
+      "CloudCut Studio Direct UPI Checkout\n\n1. Pay ₹799 to UPI ID: yourname@paytm\n2. Enter your 12-digit UPI Transaction Reference ID (UTR) below for admin approval:"
     );
 
     if (utrNumber && utrNumber.trim().length >= 6) {
-      processManualProUpgrade(utrNumber.trim());
+      submitUtrForApproval(utrNumber.trim());
     } else if (utrNumber !== null) {
-      alert("Please enter a valid Transaction Reference ID (UTR) to activate.");
+      alert("Please enter a valid Transaction Reference ID (UTR).");
     }
   };
 
-  const processManualProUpgrade = async (utr) => {
+  const submitUtrForApproval = async (utr) => {
     try {
       if (session?.user?.id && session.user.id !== 'local-test-user') {
-        const { error } = await supabase
-          .from("profiles")
-          .update({ plan: "PRO" })
-          .eq("id", session.user.id);
-        
+        const { error } = await supabase.from("payments").insert([
+          {
+            user_id: session.user.id,
+            email: session.user.email,
+            utr: utr,
+            status: 'pending'
+          }
+        ]);
+
         if (error) {
-          console.error("Database update error:", error.message);
-        } else {
-          fetchProfile(session.user.id);
+          console.error("Payment insert error:", error.message);
+          alert("Error submitting UTR. Please ensure your 'payments' table is created in Supabase.");
+          return;
         }
       }
 
-      setProfile((prev) => ({ ...prev, plan: 'PRO' }));
-      alert(`🎉 Payment Verified (UTR: ${utr})! Your account has been automatically upgraded to PRO.`);
-      setView('editor');
+      alert("⏳ Payment submitted successfully! Your UTR is now pending admin review. Once verified in our bank account, your account will be upgraded to PRO.");
+      setView('home');
     } catch (err) {
       console.error(err);
-      alert("Something went wrong during activation. Please try again.");
+      alert("Something went wrong. Please try again.");
     }
   };
 
@@ -801,7 +804,7 @@ export default function App() {
 
         <section className="flex flex-1 flex-col items-center py-16 px-4">
           <h2 className="text-3xl md:text-5xl font-extrabold text-center">Simple, Transparent Pricing</h2>
-          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Upgrade to PRO via UPI to instantly unlock your dashboard and enjoy unlimited rendering power.</p>
+          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Pay via UPI and submit your UTR for admin approval to unlock your PRO workspace.</p>
 
           <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
             {/* Free Plan */}
