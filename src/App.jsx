@@ -2,13 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import AdminDashboard from './AdminDashboard';
 import { 
-  FolderPlus, Video, Type, Download, Play, Pause, Scissors, Sun, LogOut, 
-  Sparkles, ShieldAlert, Layers, Plus, Sliders, RotateCcw, Trash2, Copy, 
-  Bold, Italic, Crop, FlipHorizontal, FlipVertical, RotateCw, ZoomIn, ZoomOut, 
-  Undo2, Redo2, Volume2, VolumeX, Music, Gauge, Image as ImageIcon, Search, Check, 
-  AlignLeft, AlignCenter, AlignRight, FileText, Sparkle, Film, Lock, Crown,
-  Smartphone, Monitor, Eye, Navigation, Crosshair, UploadCloud, Move, 
-  Wand2, Subtitles, Mic, Radio, Palette, Save, FolderOpen, CreditCard
+  FolderPlus, Video, Type, Download, Play, Pause, Scissors, LogOut, 
+  ShieldAlert, RotateCcw, Trash2, Check,
+  ZoomIn, ZoomOut, Music, Gauge, Film,
+  Wand2, Subtitles, Mic, Palette, Save, FolderOpen
 } from 'lucide-react';
 
 const TEXT_TEMPLATES = [
@@ -41,7 +38,6 @@ export default function App() {
   const [view, setView] = useState('editor');
   const [sidebarTab, setSidebarTab] = useState('media');
   const [topSubTab, setTopSubTab] = useState('Effects');
-  const [showProModal, setShowProModal] = useState(false);
 
   // Multi-Clip Sequence Engine
   const [clips, setClips] = useState([]);
@@ -57,10 +53,7 @@ export default function App() {
 
   // Audio & Playback
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [videoVolume, setVideoVolume] = useState(100);
   const [bgAudioSrc, setBgAudioSrc] = useState(null);
-  const [bgAudioName, setBgAudioName] = useState('');
-  const [bgAudioVolume, setBgAudioVolume] = useState(70);
 
   // Transform & Framing
   const [scaleMode, setScaleMode] = useState('fit');
@@ -83,9 +76,8 @@ export default function App() {
   const [subtitles, setSubtitles] = useState([]);
   const [isTranscribing, setIsTranscribing] = useState(false);
 
-  // Overlays (Text, PiP Video, Images)
+  // Overlays
   const [textLayers, setTextLayers] = useState([]);
-  const [imageOverlays, setImageOverlays] = useState([]);
   const [pipVideoOverlays, setPipVideoOverlays] = useState([]);
   const [selectedLayerId, setSelectedLayerId] = useState(null);
   const [selectedOverlayType, setSelectedOverlayType] = useState(null);
@@ -95,11 +87,12 @@ export default function App() {
   const [exportProgress, setExportProgress] = useState(0);
   const [exportFormat, setExportFormat] = useState('mp4');
 
-  // Dragging & Resizing Refs
+  // Dragging & Scrubbing
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const isDraggingRef = useRef(false);
   const isResizingRef = useRef(false);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const resizeStartRef = useRef({ x: 0, y: 0, initialW: 0, initialH: 0, initialSize: 50 });
+  const resizeStartRef = useRef({ x: 0, y: 0, initialW: 0, initialH: 0 });
 
   // DOM Refs
   const videoRef = useRef(null);
@@ -111,6 +104,36 @@ export default function App() {
   const recordedChunksRef = useRef([]);
 
   const isPro = profile?.plan === 'PRO';
+
+  const totalDuration = clips.reduce((acc, c) => acc + (c.trimEnd - c.trimStart), 0);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setSession(session);
+        fetchProfile(session.user.id);
+      }
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session) {
+        setSession(session);
+        fetchProfile(session.user.id);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchProfile = async (id) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', id).single();
+    if (data) setProfile(data);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setProfile(null);
+    setView('editor');
+  };
 
   const handleUpgradePro = () => {
     const options = {
@@ -156,55 +179,26 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-        fetchProfile(session.user.id);
-      }
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (session) {
-        setSession(session);
-        fetchProfile(session.user.id);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+  // Timeline Navigation & Drag-to-Scrub
+  const handleScrub = (e) => {
+    if (!timelineRef.current || !videoRef.current || !totalDuration) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const targetTotalTime = (clickX / rect.width) * totalDuration;
 
-  const fetchProfile = async (id) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', id).single();
-    if (data) setProfile(data);
-  };
-
-  const handleDeleteClip = () => {
-    if (!clips.length) return;
-    const updated = clips.filter((_, idx) => idx !== activeClipIndex);
-    setClips(updated);
-    setActiveClipIndex(Math.max(0, activeClipIndex - 1));
-    if (videoRef.current) {
-      videoRef.current.pause();
-      setIsPlaying(false);
+    let accumulated = 0;
+    for (let i = 0; i < clips.length; i++) {
+      const clipDur = clips[i].trimEnd - clips[i].trimStart;
+      if (targetTotalTime <= accumulated + clipDur || i === clips.length - 1) {
+        setActiveClipIndex(i);
+        const clipTime = clips[i].trimStart + (targetTotalTime - accumulated);
+        videoRef.current.currentTime = Math.max(clips[i].trimStart, Math.min(clips[i].trimEnd, clipTime));
+        setCurrentTime(targetTotalTime);
+        break;
+      }
+      accumulated += clipDur;
     }
   };
-
-  const handleStop = () => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-      setIsPlaying(false);
-      setCurrentTime(0);
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setSession(null);
-    setProfile(null);
-    setView('editor');
-  };
-
-  const totalDuration = clips.reduce((acc, c) => acc + (c.trimEnd - c.trimStart), 0);
 
   // Multi-Video Clip Import
   const handleFileUpload = (e) => {
@@ -254,10 +248,6 @@ export default function App() {
           width: initialWidth,
           height: initialWidth / aspect,
           aspectRatio: aspect,
-          cropTop: 0,
-          cropBottom: 0,
-          cropLeft: 0,
-          cropRight: 0,
           opacity: 100
         };
         setPipVideoOverlays((prev) => [...prev, newPip]);
@@ -273,14 +263,13 @@ export default function App() {
     if (!file) return;
     const url = URL.createObjectURL(file);
     setBgAudioSrc(url);
-    setBgAudioName(file.name);
     if (audioRef.current) {
       audioRef.current.src = url;
       if (isPlaying) audioRef.current.play();
     }
   };
 
-  // Auto-Captions Engine (Web Speech Recognition)
+  // Auto-Captions Engine
   const startAutoCaptions = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -323,33 +312,58 @@ export default function App() {
     if (isPlaying) {
       videoRef.current.pause();
       if (audioRef.current) audioRef.current.pause();
-      pipVideoOverlays.forEach((p) => p.videoElement.pause());
+      pipVideoOverlays.forEach((p) => p.videoElement?.pause());
       setIsPlaying(false);
     } else {
       videoRef.current.play().then(() => {
         if (audioRef.current && bgAudioSrc) audioRef.current.play();
-        pipVideoOverlays.forEach((p) => p.videoElement.play().catch(() => {}));
+        pipVideoOverlays.forEach((p) => p.videoElement?.play().catch(() => {}));
         setIsPlaying(true);
       }).catch(() => {});
     }
   };
 
-  // Split Tool
+  const handleStop = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = clips[0]?.trimStart || 0;
+      setActiveClipIndex(0);
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  };
+
+  // Precision Split Tool
   const handleSplitClip = () => {
     if (!clips.length || !videoRef.current) return;
     const clip = clips[activeClipIndex];
     if (!clip) return;
-    const splitPoint = clip.trimStart + videoRef.current.currentTime;
-    if (splitPoint <= clip.trimStart + 0.1 || splitPoint >= clip.trimEnd - 0.1) return;
 
-    const first = { ...clip, id: Date.now(), name: `${clip.name} (Part 1)`, trimEnd: splitPoint };
-    const second = { ...clip, id: Date.now() + 1, name: `${clip.name} (Part 2)`, trimStart: splitPoint };
+    const currentLocalTime = videoRef.current.currentTime;
+    if (currentLocalTime <= clip.trimStart + 0.2 || currentLocalTime >= clip.trimEnd - 0.2) return;
+
+    const cleanBaseName = clip.name.replace(/ \(Part \d+\)/g, '');
+    const first = { ...clip, id: Date.now(), name: `${cleanBaseName} (Part 1)`, trimEnd: currentLocalTime };
+    const second = { ...clip, id: Date.now() + 1, name: `${cleanBaseName} (Part 2)`, trimStart: currentLocalTime };
+
     const updated = [...clips];
     updated.splice(activeClipIndex, 1, first, second);
     setClips(updated);
   };
 
-  // Interactive Drag-and-Trim on Timeline Blocks
+  // Delete Active Cut
+  const handleDeleteClip = () => {
+    if (!clips.length) return;
+    const updated = clips.filter((_, idx) => idx !== activeClipIndex);
+    setClips(updated);
+    setActiveClipIndex(Math.max(0, activeClipIndex - 1));
+    if (videoRef.current) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  // Trim Slider Handles
   const handleUpdateTrim = (clipId, trimType, deltaSeconds) => {
     setClips((prev) =>
       prev.map((c) => {
@@ -365,7 +379,7 @@ export default function App() {
     );
   };
 
-  // Save Project as JSON (.cloudcut file)
+  // Save Project as JSON
   const handleSaveProjectFile = () => {
     const projectData = {
       version: '1.0.0',
@@ -390,7 +404,7 @@ export default function App() {
     window.URL.revokeObjectURL(url);
   };
 
-  // Load Project from JSON (.cloudcut file)
+  // Load Project
   const handleLoadProjectFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -415,7 +429,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Canvas Mouse Interactions
+  // Canvas Interactions
   const handleCanvasMouseDown = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -566,22 +580,6 @@ export default function App() {
         ctx.filter = 'none';
         ctx.restore();
 
-        // Transitions
-        const clipProgress = video.currentTime / (video.duration || 1);
-        if (activeTransition === 'fadeBlack') {
-          if (clipProgress < 0.15) {
-            ctx.fillStyle = `rgba(0, 0, 0, ${1 - clipProgress / 0.15})`;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-          } else if (clipProgress > 0.85) {
-            ctx.fillStyle = `rgba(0, 0, 0, ${(clipProgress - 0.85) / 0.15})`;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-          }
-        } else if (activeTransition === 'wipe' && clipProgress < 0.2) {
-          const wipeW = canvas.width * (1 - clipProgress / 0.2);
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(0, 0, wipeW, canvas.height);
-        }
-
         // Chroma Key (PRO)
         if (chromaKeyEnabled && isPro) {
           const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -604,14 +602,6 @@ export default function App() {
             ctx.globalAlpha = (pip.opacity || 100) / 100;
             ctx.drawImage(pip.videoElement, pip.x, pip.y, pip.width, pip.height);
             ctx.restore();
-
-            if (pip.id === selectedLayerId && selectedOverlayType === 'video') {
-              ctx.strokeStyle = '#6366f1';
-              ctx.lineWidth = 2.5;
-              ctx.strokeRect(pip.x - 2, pip.y - 2, pip.width + 4, pip.height + 4);
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(pip.x + pip.width - 6, pip.y + pip.height - 6, 12, 12);
-            }
           }
         });
 
@@ -648,7 +638,13 @@ export default function App() {
           ctx.fillText(activeSub.text, subX, subY);
         }
 
-        setCurrentTime(video.currentTime);
+        // Sync Global Time Position
+        let elapsed = 0;
+        for (let i = 0; i < activeClipIndex; i++) {
+          elapsed += (clips[i].trimEnd - clips[i].trimStart);
+        }
+        const currentClipPos = Math.max(0, video.currentTime - (clips[activeClipIndex]?.trimStart || 0));
+        setCurrentTime(elapsed + currentClipPos);
       }
       requestRef.current = requestAnimationFrame(renderFrame);
     };
@@ -658,7 +654,7 @@ export default function App() {
   }, [
     brightness, contrast, saturation, scaleMode, rotation, flipH, flipV,
     cropInset, aspectRatio, activeTransition, activeLut, chromaKeyEnabled, chromaKeyColor, chromaTolerance, isPro,
-    textLayers, imageOverlays, pipVideoOverlays, subtitles, selectedLayerId, selectedOverlayType, clips, activeClipIndex, isPlaying
+    textLayers, pipVideoOverlays, subtitles, clips, activeClipIndex
   ]);
 
   const formatTime = (secs) => {
@@ -717,10 +713,10 @@ export default function App() {
       setExportProgress(0);
     };
 
-    videoRef.current.currentTime = 0;
+    videoRef.current.currentTime = clips[0]?.trimStart || 0;
     videoRef.current.play();
     if (audioRef.current) audioRef.current.play();
-    pipVideoOverlays.forEach((p) => p.videoElement.play().catch(() => {}));
+    pipVideoOverlays.forEach((p) => p.videoElement?.play().catch(() => {}));
     mediaRecorderRef.current.start(100);
 
     const exportInterval = setInterval(() => {
@@ -728,10 +724,10 @@ export default function App() {
         clearInterval(exportInterval);
         return;
       }
-      const p = Math.min(100, Math.round((videoRef.current.currentTime / videoRef.current.duration) * 100));
+      const p = Math.min(100, Math.round((currentTime / (totalDuration || 1)) * 100));
       setExportProgress(p);
 
-      if (videoRef.current.ended || videoRef.current.currentTime >= videoRef.current.duration) {
+      if (videoRef.current.ended || currentTime >= totalDuration) {
         clearInterval(exportInterval);
         mediaRecorderRef.current.stop();
         videoRef.current.pause();
@@ -803,7 +799,7 @@ export default function App() {
 
           <div className="h-4 w-[1px] bg-gray-700" />
 
-          {/* Aspect Ratio Switcher */}
+          {/* Aspect Ratio Presets */}
           <div className="flex items-center bg-[#101115] p-0.5 rounded-lg border border-gray-800 text-xs">
             {['16:9', '9:16', '1:1', '4:5'].map((r) => (
               <button
@@ -818,7 +814,7 @@ export default function App() {
 
           <div className="h-4 w-[1px] bg-gray-700" />
 
-          {/* Project Save & Load Controls */}
+          {/* Project Save & Load */}
           <div className="flex items-center gap-1">
             <button onClick={handleSaveProjectFile} className="flex items-center gap-1 text-xs text-gray-300 hover:text-white bg-[#1a1b22] px-2.5 py-1 rounded border border-gray-800" title="Save Project (.cloudcut)">
               <Save size={13} /> Save Project
@@ -858,7 +854,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Workspace Layout */}
+      {/* Main Workspace */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left Toolbar */}
         <aside className="flex w-14 flex-col items-center border-r border-[#23242c] bg-[#121318] py-3 gap-5 shrink-0">
@@ -877,12 +873,9 @@ export default function App() {
           <button onClick={() => setSidebarTab('text')} className={`p-2 rounded-xl transition ${sidebarTab === 'text' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Text">
             <Type size={18} />
           </button>
-          <button onClick={() => setSidebarTab('speed')} className={`p-2 rounded-xl transition ${sidebarTab === 'speed' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Speed & Transform">
-            <Gauge size={18} />
-          </button>
         </aside>
 
-        {/* Drawer Panel */}
+        {/* Drawer Controls Panel */}
         <aside className="w-88 border-r border-[#23242c] bg-[#16171d] flex flex-col shrink-0">
           <div className="flex h-10 border-b border-[#23242c] bg-[#14151a] px-3 items-center justify-between text-xs text-gray-400">
             {['Effects', 'Transform', 'Adjust', 'Speed'].map((tab) => (
@@ -897,7 +890,6 @@ export default function App() {
           </div>
 
           <div className="flex-1 p-4 overflow-y-auto">
-            {/* TRANSITIONS & CINEMATIC LUTS */}
             {topSubTab === 'Effects' && (
               <div className="space-y-6">
                 <div>
@@ -937,7 +929,6 @@ export default function App() {
               </div>
             )}
 
-            {/* AUTO-CAPTIONS & SUBTITLES */}
             {sidebarTab === 'captions' && (
               <div className="space-y-4">
                 <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Auto-Speech Captions</span>
@@ -961,46 +952,6 @@ export default function App() {
               </div>
             )}
 
-            {/* PiP VIDEO OVERLAY */}
-            {sidebarTab === 'pip' && (
-              <div className="space-y-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Picture-in-Picture Video</span>
-                <label className="flex h-24 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-indigo-500/40 bg-[#1c1d25] p-3 text-center hover:border-indigo-500 transition">
-                  <Video size={22} className="text-indigo-400 mb-1" />
-                  <span className="text-xs font-semibold text-white">Import PiP Video from Device</span>
-                  <input type="file" accept="video/*" multiple className="hidden" onChange={handleCustomVideoOverlayUpload} />
-                </label>
-              </div>
-            )}
-
-            {/* AUDIO TAB */}
-            {sidebarTab === 'audio' && (
-              <div className="space-y-4">
-                <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Audio & Music</span>
-                <label className="flex h-24 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/40 bg-[#1c1d25] p-3 text-center hover:border-emerald-500 transition">
-                  <Music size={22} className="text-emerald-400 mb-1" />
-                  <span className="text-xs font-semibold text-white">Import Audio from Device / Mobile</span>
-                  <input type="file" accept="audio/*" className="hidden" onChange={handleDeviceAudioUpload} />
-                </label>
-              </div>
-            )}
-
-            {/* SPEED & TRANSFORM */}
-            {topSubTab === 'Speed' && (
-              <div className="space-y-4">
-                <div className="flex justify-between text-xs text-gray-400">
-                  <span>Playback Speed</span>
-                  <span>{playbackSpeed}x</span>
-                </div>
-                <input
-                  type="range" min="0.25" max="3" step="0.05" value={playbackSpeed}
-                  onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
-                  className="w-full accent-indigo-500"
-                />
-              </div>
-            )}
-
-            {/* MEDIA */}
             {sidebarTab === 'media' && (
               <div className="space-y-4">
                 <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Video Tracks</span>
@@ -1011,29 +962,10 @@ export default function App() {
                 </label>
               </div>
             )}
-
-            {/* TEXT */}
-            {sidebarTab === 'text' && (
-              <div className="space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block mb-2">Text Presets</span>
-                {TEXT_TEMPLATES.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    onClick={() => {
-                      loadFont(tpl.font);
-                      setTextLayers([...textLayers, { id: Date.now(), text: tpl.label, fontFamily: tpl.font, size: tpl.size, color: tpl.color, strokeColor: tpl.stroke, strokeWidth: tpl.strokeW, x: 200, y: 200 }]);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-[#1c1d25] border border-gray-800 text-center font-bold text-xs"
-                  >
-                    {tpl.label}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </aside>
 
-        {/* Viewport Canvas (Middle) */}
+        {/* Viewport Canvas */}
         <main className="flex flex-1 flex-col items-center justify-center bg-black p-4 relative overflow-hidden">
           <div className="relative aspect-video w-full max-w-4xl rounded border border-gray-800 bg-[#090a0d] flex items-center justify-center overflow-hidden shadow-2xl">
             <video
@@ -1066,7 +998,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* Multi-Track Timeline with Playhead Scrubber & Delete Tool */}
+      {/* Multi-Track Timeline with Continuous Proportional Blocks and Smooth Playhead */}
       <footer className="h-48 border-t border-[#23242c] bg-[#121318] flex flex-col shrink-0">
         <div className="flex h-9 items-center justify-between border-b border-[#23242c] bg-[#16171d] px-4">
           <div className="flex items-center gap-2">
@@ -1074,7 +1006,7 @@ export default function App() {
             <button onClick={togglePlay} disabled={!clips.length} className="p-1 text-white hover:text-indigo-400" title="Play / Pause">
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
-            {/* Stop */}
+            {/* Stop & Reset */}
             <button onClick={handleStop} disabled={!clips.length} className="p-1 text-gray-300 hover:text-red-400" title="Stop & Reset">
               <RotateCcw size={15} />
             </button>
@@ -1098,66 +1030,72 @@ export default function App() {
           </div>
         </div>
 
-        {/* Timeline Tracks with Scrubbing Playhead */}
+        {/* Proportional Scrubbable Timeline */}
         <div 
           ref={timelineRef} 
-          onClick={(e) => {
-            if (!videoRef.current || !totalDuration) return;
-            const rect = e.currentTarget.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-            videoRef.current.currentTime = ratio * (videoRef.current.duration || 1);
+          onMouseDown={(e) => {
+            setIsScrubbing(true);
+            handleScrub(e);
           }}
-          className="relative flex-1 overflow-x-auto p-3 bg-[#0d0e12] flex flex-col justify-center cursor-pointer"
+          onMouseMove={(e) => {
+            if (isScrubbing) handleScrub(e);
+          }}
+          onMouseUp={() => setIsScrubbing(false)}
+          onMouseLeave={() => setIsScrubbing(false)}
+          className="relative flex-1 p-3 bg-[#0d0e12] flex flex-col justify-center cursor-ew-resize select-none overflow-hidden"
         >
-          {/* Red Playhead Line */}
+          {/* Red Playhead Indicator */}
           <div 
-            className="absolute top-0 bottom-0 w-[2px] bg-red-500 pointer-events-none z-20 flex flex-col items-center"
+            className="absolute top-0 bottom-0 w-[2px] bg-red-500 pointer-events-none z-30 flex flex-col items-center"
             style={{ 
-              left: `${totalDuration ? (currentTime / totalDuration) * 100 : 0}%`,
-              transition: isPlaying ? 'none' : 'left 0.1s linear'
+              left: `${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}%`,
+              transition: isPlaying ? 'none' : 'left 0.05s linear'
             }}
           >
-            <div className="w-2.5 h-2.5 bg-red-500 rotate-45 -mt-1 rounded-[1px]" />
+            <div className="w-3 h-3 bg-red-500 rotate-45 -mt-1 shadow-md shadow-red-500/50" />
           </div>
 
-          <div className="relative flex items-center gap-3 z-10">
-            {clips.map((clip, idx) => (
-              <div
-                key={clip.id}
-                onClick={(e) => { e.stopPropagation(); setActiveClipIndex(idx); }}
-                className={`relative h-14 min-w-[240px] rounded-lg border flex items-center justify-between px-2 transition ${activeClipIndex === idx ? 'border-amber-400 bg-amber-500/10 text-white shadow-lg' : 'border-gray-800 bg-[#191a20] text-gray-400'}`}
-              >
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'start', 0.5); }}
-                  className="h-full w-4 bg-gray-800 hover:bg-amber-500 rounded-l text-[9px] text-gray-300 flex items-center justify-center cursor-ew-resize"
-                  title="Trim Left Edge (+0.5s)"
-                >
-                  |
-                </button>
+          {/* Connected Proportional Clips */}
+          <div className="relative flex w-full h-16 bg-[#16171d] rounded-lg overflow-hidden border border-gray-800 z-10">
+            {clips.map((clip, idx) => {
+              const clipDur = clip.trimEnd - clip.trimStart;
+              const widthPct = totalDuration > 0 ? (clipDur / totalDuration) * 100 : 100;
 
-                <div className="flex flex-col items-center truncate px-2">
-                  <span className="text-[11px] font-semibold truncate">{clip.name}</span>
-                  <span className="text-[9px] font-mono text-gray-500">{formatTime(clip.trimEnd - clip.trimStart)}</span>
+              return (
+                <div
+                  key={clip.id}
+                  onClick={(e) => { e.stopPropagation(); setActiveClipIndex(idx); }}
+                  style={{ width: `${widthPct}%` }}
+                  className={`relative h-full border-r border-gray-900/80 flex items-center justify-between px-2 transition-colors ${
+                    activeClipIndex === idx 
+                      ? 'bg-amber-500/20 border-b-2 border-b-amber-400 text-white' 
+                      : 'bg-[#1c1d25] hover:bg-[#232430] text-gray-400'
+                  }`}
+                >
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'start', 0.5); }}
+                    className="h-full w-2 hover:w-3 bg-gray-700/60 hover:bg-amber-500 rounded-l text-[8px] text-gray-300 flex items-center justify-center cursor-ew-resize transition-all"
+                    title="Trim Start (+0.5s)"
+                  >
+                    |
+                  </button>
+
+                  <div className="flex flex-col items-center truncate px-1 pointer-events-none">
+                    <span className="text-[10px] font-semibold truncate">{clip.name}</span>
+                    <span className="text-[9px] font-mono text-gray-400">{formatTime(clipDur)}</span>
+                  </div>
+
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'end', -0.5); }}
+                    className="h-full w-2 hover:w-3 bg-gray-700/60 hover:bg-amber-500 rounded-r text-[8px] text-gray-300 flex items-center justify-center cursor-ew-resize transition-all"
+                    title="Trim End (-0.5s)"
+                  >
+                    |
+                  </button>
                 </div>
-
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'end', -0.5); }}
-                  className="h-full w-4 bg-gray-800 hover:bg-amber-500 rounded-r text-[9px] text-gray-300 flex items-center justify-center cursor-ew-resize"
-                  title="Trim Right Edge (-0.5s)"
-                >
-                  |
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
-
-          {subtitles.length > 0 && (
-            <div className="h-5 w-full rounded bg-yellow-950/30 border border-yellow-500/20 mt-1 flex items-center px-3">
-              <span className="text-[9px] font-mono text-yellow-400 mr-3">Auto-Captions ({subtitles.length})</span>
-              <div className="flex-1 h-1 bg-yellow-500/40 rounded-full" />
-            </div>
-          )}
         </div>
       </footer>
     </div>
