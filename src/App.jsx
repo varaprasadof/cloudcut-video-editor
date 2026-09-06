@@ -3,9 +3,8 @@ import { supabase } from './supabaseClient';
 import AdminDashboard from './AdminDashboard';
 import { 
   FolderPlus, Video, Type, Download, Play, Pause, Scissors, LogOut, 
-  ShieldAlert, RotateCcw, Trash2, Check,
-  ZoomIn, ZoomOut, Music, Film,
-  Wand2, Subtitles, Mic, Palette, Save, FolderOpen
+  ShieldAlert, RotateCcw, Trash2, Check, ZoomIn, ZoomOut, Music, Film,
+  Wand2, Subtitles, Mic, Palette, Save, FolderOpen, Crown, User, Lock, Sparkles, CheckCircle2
 } from 'lucide-react';
 
 const TEXT_TEMPLATES = [
@@ -35,11 +34,18 @@ const CINEMATIC_LUTS = [
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [view, setView] = useState('editor');
+  
+  // Navigation views: 'home', 'pricing', 'editor', 'admin'
+  const [view, setView] = useState('home');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+
   const [sidebarTab, setSidebarTab] = useState('media');
   const [topSubTab, setTopSubTab] = useState('Effects');
 
-  // Multi-Clip Sequence Engine
+  // Multi-Clip Sequence Engine & Free Limits
   const [clips, setClips] = useState([]);
   const [activeClipIndex, setActiveClipIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -54,24 +60,20 @@ export default function App() {
   // Audio & Playback
   const [bgAudioSrc, setBgAudioSrc] = useState(null);
 
-  // Transform & Framing
+  // Transform, Framing & Lighting
   const [scaleMode] = useState('fit');
   const [rotation] = useState(0);
   const [flipH] = useState(false);
   const [flipV] = useState(false);
   const [cropInset] = useState({ top: 0, bottom: 0, left: 0, right: 0 });
-
-  // Lighting Adjustments
   const [brightness] = useState(100);
   const [contrast] = useState(100);
   const [saturation] = useState(100);
-
-  // Chroma Key (PRO)
   const [chromaKeyEnabled] = useState(false);
   const [chromaKeyColor] = useState('#00ff00');
   const [chromaTolerance] = useState(90);
 
-  // Auto-Captions & Subtitles Engine
+  // Auto-Captions
   const [subtitles, setSubtitles] = useState([]);
   const [isTranscribing, setIsTranscribing] = useState(false);
 
@@ -81,11 +83,11 @@ export default function App() {
   const [selectedLayerId, setSelectedLayerId] = useState(null);
   const [selectedOverlayType, setSelectedOverlayType] = useState(null);
 
-  // Export State & Tiered Resolution
+  // Export & Resolution
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportFormat, setExportFormat] = useState('mp4');
-  const [exportResolution, setExportResolution] = useState('720p'); // '720p', '1080p', '2k'
+  const [exportResolution, setExportResolution] = useState('720p');
 
   // Dragging & Scrubbing
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -104,7 +106,6 @@ export default function App() {
   const recordedChunksRef = useRef([]);
 
   const isPro = profile?.plan === 'PRO';
-
   const totalDuration = clips.reduce((acc, c) => acc + (c.trimEnd - c.trimStart), 0);
 
   useEffect(() => {
@@ -128,11 +129,37 @@ export default function App() {
     if (data) setProfile(data);
   };
 
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    if (isSignUp) {
+      const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      if (error) alert(error.message);
+      else {
+        if (data?.user) {
+          await supabase.from('profiles').insert([{ id: data.user.id, email: authEmail, plan: 'FREE', edits_count: 0 }]);
+          fetchProfile(data.user.id);
+        }
+        alert('Signed up successfully!');
+        setShowAuthModal(false);
+        setView('editor');
+      }
+    } else {
+      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) alert(error.message);
+      else {
+        setSession(data.session);
+        fetchProfile(data.user.id);
+        setShowAuthModal(false);
+        setView('editor');
+      }
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSession(null);
     setProfile(null);
-    setView('editor');
+    setView('home');
   };
 
   const handleUpgradePro = () => {
@@ -150,18 +177,15 @@ export default function App() {
               .from("profiles")
               .update({ plan: "PRO" })
               .eq("id", session.user.id);
+            fetchProfile(session.user.id);
           }
-          alert("🎉 Payment Successful! PRO plan unlocked.");
+          alert("🎉 Payment Successful! Your dashboard is now upgraded to PRO.");
+          setView('editor');
         }
       },
-      prefill: {
-        email: session?.user?.email || "user@example.com",
-      },
-      theme: {
-        color: "#6366f1",
-      },
+      prefill: { email: session?.user?.email || "user@example.com" },
+      theme: { color: "#6366f1" },
     };
-
     const razorpay = new window.Razorpay(options);
     razorpay.open();
   };
@@ -179,7 +203,6 @@ export default function App() {
     }
   };
 
-  // Timeline Navigation & Drag-to-Scrub
   const handleScrub = (e) => {
     if (!timelineRef.current || !videoRef.current || !totalDuration) return;
     const rect = timelineRef.current.getBoundingClientRect();
@@ -200,14 +223,32 @@ export default function App() {
     }
   };
 
-  // Multi-Video Clip Import
+  // Free User Limit Check: Max 3 edits & Max 1 min duration
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files || []);
     files.forEach((file) => {
       const tempVideo = document.createElement('video');
       const url = URL.createObjectURL(file);
       tempVideo.src = url;
-      tempVideo.onloadedmetadata = () => {
+      tempVideo.onloadedmetadata = async () => {
+        // Enforce 1-minute limit for Free users
+        if (!isPro && tempVideo.duration > 60) {
+          alert('Free users can only edit videos up to 1 minute long. Upgrade to PRO for unlimited length!');
+          return;
+        }
+        // Enforce 3 edits limit for Free users
+        if (!isPro && profile?.edits_count >= 3) {
+          alert('You have reached your 3 free video edits limit! Please upgrade to PRO for unlimited editing.');
+          setView('pricing');
+          return;
+        }
+
+        if (!isPro && session?.user?.id) {
+          const newCount = (profile?.edits_count || 0) + 1;
+          await supabase.from('profiles').update({ edits_count: newCount }).eq('id', session.user.id);
+          fetchProfile(session.user.id);
+        }
+
         setClips((prev) => [
           ...prev,
           {
@@ -223,7 +264,6 @@ export default function App() {
     });
   };
 
-  // PiP Video Overlay Import
   const handleCustomVideoOverlayUpload = (e) => {
     const files = Array.from(e.target.files || []);
     files.forEach((file) => {
@@ -257,7 +297,6 @@ export default function App() {
     });
   };
 
-  // Audio Import
   const handleDeviceAudioUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -269,14 +308,12 @@ export default function App() {
     }
   };
 
-  // Auto-Captions Engine
   const startAutoCaptions = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert('Speech Recognition is supported directly in Google Chrome, Edge, and Safari.');
       return;
     }
-
     setIsTranscribing(true);
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -286,17 +323,8 @@ export default function App() {
     recognition.onresult = (event) => {
       const latest = event.results[event.results.length - 1][0].transcript;
       const stamp = videoRef.current ? videoRef.current.currentTime : 0;
-      setSubtitles((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          text: latest.trim(),
-          start: Math.max(0, stamp - 1),
-          end: stamp + 2.5
-        }
-      ]);
+      setSubtitles((prev) => [...prev, { id: Date.now(), text: latest.trim(), start: Math.max(0, stamp - 1), end: stamp + 2.5 }]);
     };
-
     recognition.onerror = () => setIsTranscribing(false);
     recognition.onend = () => setIsTranscribing(false);
 
@@ -333,12 +361,10 @@ export default function App() {
     }
   };
 
-  // Precision Split Tool
   const handleSplitClip = () => {
     if (!clips.length || !videoRef.current) return;
     const clip = clips[activeClipIndex];
     if (!clip) return;
-
     const currentLocalTime = videoRef.current.currentTime;
     if (currentLocalTime <= clip.trimStart + 0.2 || currentLocalTime >= clip.trimEnd - 0.2) return;
 
@@ -351,7 +377,6 @@ export default function App() {
     setClips(updated);
   };
 
-  // Delete Active Cut
   const handleDeleteClip = () => {
     if (!clips.length) return;
     const updated = clips.filter((_, idx) => idx !== activeClipIndex);
@@ -363,38 +388,29 @@ export default function App() {
     }
   };
 
-  // Trim Slider Handles
   const handleUpdateTrim = (clipId, trimType, deltaSeconds) => {
     setClips((prev) =>
       prev.map((c) => {
         if (c.id !== clipId) return c;
         if (trimType === 'start') {
-          const nextStart = Math.max(0, Math.min(c.trimEnd - 0.5, c.trimStart + deltaSeconds));
-          return { ...c, trimStart: nextStart };
+          return { ...c, trimStart: Math.max(0, Math.min(c.trimEnd - 0.5, c.trimStart + deltaSeconds)) };
         } else {
-          const nextEnd = Math.max(c.trimStart + 0.5, Math.min(c.duration, c.trimEnd + deltaSeconds));
-          return { ...c, trimEnd: nextEnd };
+          return { ...c, trimEnd: Math.max(c.trimStart + 0.5, Math.min(c.duration, c.trimEnd + deltaSeconds)) };
         }
       })
     );
   };
 
-  // Save Project as JSON
   const handleSaveProjectFile = () => {
     const projectData = {
       version: '1.0.0',
       timestamp: Date.now(),
       aspectRatio,
-      brightness,
-      contrast,
-      saturation,
       activeTransition,
       activeLut,
-      textLayers,
       subtitles,
       clips: clips.map((c) => ({ id: c.id, name: c.name, duration: c.duration, trimStart: c.trimStart, trimEnd: c.trimEnd }))
     };
-
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -404,11 +420,9 @@ export default function App() {
     window.URL.revokeObjectURL(url);
   };
 
-  // Load Project
   const handleLoadProjectFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -416,9 +430,8 @@ export default function App() {
         if (data.aspectRatio) setAspectRatio(data.aspectRatio);
         if (data.activeTransition) setActiveTransition(data.activeTransition);
         if (data.activeLut) setActiveLut(data.activeLut);
-        if (data.textLayers) setTextLayers(data.textLayers);
         if (data.subtitles) setSubtitles(data.subtitles);
-        alert('Project loaded successfully! (Re-select video clips if paths changed)');
+        alert('Project loaded successfully!');
       } catch (err) {
         alert('Invalid project file.');
       }
@@ -426,7 +439,6 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Canvas Interactions
   const handleCanvasMouseDown = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -448,7 +460,6 @@ export default function App() {
         }
       }
     }
-
     for (let i = pipVideoOverlays.length - 1; i >= 0; i--) {
       const pip = pipVideoOverlays[i];
       if (mouseX >= pip.x && mouseX <= pip.x + pip.width && mouseY >= pip.y && mouseY <= pip.y + pip.height) {
@@ -459,21 +470,6 @@ export default function App() {
         return;
       }
     }
-
-    for (let i = textLayers.length - 1; i >= 0; i--) {
-      const l = textLayers[i];
-      const ctx = canvas.getContext('2d');
-      ctx.font = `${l.size}px "${l.fontFamily}"`;
-      const w = ctx.measureText(l.text).width;
-      if (mouseX >= l.x - 10 && mouseX <= l.x + w + 10 && mouseY >= l.y - l.size && mouseY <= l.y + 10) {
-        setSelectedLayerId(l.id);
-        setSelectedOverlayType('text');
-        isDraggingRef.current = true;
-        dragOffsetRef.current = { x: mouseX - l.x, y: mouseY - l.y };
-        return;
-      }
-    }
-
     setSelectedLayerId(null);
     setSelectedOverlayType(null);
   };
@@ -495,25 +491,10 @@ export default function App() {
       );
       return;
     }
-
-    if (isDraggingRef.current && selectedLayerId) {
-      if (selectedOverlayType === 'video') {
-        setPipVideoOverlays((prev) =>
-          prev.map((pip) =>
-            pip.id === selectedLayerId
-              ? { ...pip, x: mouseX - dragOffsetRef.current.x, y: mouseY - dragOffsetRef.current.y }
-              : pip
-          )
-        );
-      } else if (selectedOverlayType === 'text') {
-        setTextLayers((prev) =>
-          prev.map((l) =>
-            l.id === selectedLayerId
-              ? { ...l, x: mouseX - dragOffsetRef.current.x, y: mouseY - dragOffsetRef.current.y }
-              : l
-          )
-        );
-      }
+    if (isDraggingRef.current && selectedLayerId && selectedOverlayType === 'video') {
+      setPipVideoOverlays((prev) =>
+        prev.map((pip) => (pip.id === selectedLayerId ? { ...pip, x: mouseX - dragOffsetRef.current.x, y: mouseY - dragOffsetRef.current.y } : pip))
+      );
     }
   };
 
@@ -577,22 +558,6 @@ export default function App() {
         ctx.filter = 'none';
         ctx.restore();
 
-        // Chroma Key (PRO)
-        if (chromaKeyEnabled && isPro) {
-          const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = frame.data;
-          const targetR = parseInt(chromaKeyColor.slice(1, 3), 16);
-          const targetG = parseInt(chromaKeyColor.slice(3, 5), 16);
-          const targetB = parseInt(chromaKeyColor.slice(5, 7), 16);
-
-          for (let i = 0; i < data.length; i += 4) {
-            const diff = Math.hypot(data[i] - targetR, data[i + 1] - targetG, data[i + 2] - targetB);
-            if (diff < chromaTolerance) data[i + 3] = 0;
-          }
-          ctx.putImageData(frame, 0, 0);
-        }
-
-        // Render PiP Videos
         pipVideoOverlays.forEach((pip) => {
           if (pip.videoElement && pip.videoElement.readyState >= 2) {
             ctx.save();
@@ -602,40 +567,6 @@ export default function App() {
           }
         });
 
-        // Render Text
-        textLayers.forEach((l) => {
-          const font = `${l.isBold ? 'bold ' : ''}${l.size}px "${l.fontFamily}", sans-serif`;
-          ctx.font = font;
-          if (l.strokeWidth > 0) {
-            ctx.strokeStyle = l.strokeColor;
-            ctx.lineWidth = l.strokeWidth;
-            ctx.strokeText(l.text, l.x, l.y);
-          }
-          ctx.fillStyle = l.color;
-          ctx.fillText(l.text, l.x, l.y);
-        });
-
-        // Render Subtitles
-        const activeSub = subtitles.find(
-          (s) => video.currentTime >= s.start && video.currentTime <= s.end
-        );
-        if (activeSub) {
-          ctx.font = 'bold 36px Montserrat, sans-serif';
-          const subMetrics = ctx.measureText(activeSub.text);
-          const subX = (canvas.width - subMetrics.width) / 2;
-          const subY = canvas.height - 70;
-
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-          ctx.fillRect(subX - 16, subY - 38, subMetrics.width + 32, 50);
-
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 5;
-          ctx.strokeText(activeSub.text, subX, subY);
-          ctx.fillStyle = '#facc15';
-          ctx.fillText(activeSub.text, subX, subY);
-        }
-
-        // Sync Global Time Position
         let elapsed = 0;
         for (let i = 0; i < activeClipIndex; i++) {
           elapsed += (clips[i].trimEnd - clips[i].trimStart);
@@ -650,8 +581,8 @@ export default function App() {
     return () => cancelAnimationFrame(requestRef.current);
   }, [
     brightness, contrast, saturation, scaleMode, rotation, flipH, flipV,
-    cropInset, aspectRatio, activeTransition, activeLut, chromaKeyEnabled, chromaKeyColor, chromaTolerance, isPro,
-    textLayers, pipVideoOverlays, subtitles, clips, activeClipIndex, exportResolution
+    cropInset, aspectRatio, activeTransition, activeLut, isPro,
+    pipVideoOverlays, subtitles, clips, activeClipIndex, exportResolution
   ]);
 
   const formatTime = (secs) => {
@@ -660,10 +591,8 @@ export default function App() {
     return `${mins.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
   };
 
-  // Safe Client-Side Exporter with Guaranteed Timeout Completion
   const startClientSideExport = () => {
     if (!canvasRef.current || !videoRef.current) return;
-
     setIsExporting(true);
     setExportProgress(5);
     recordedChunksRef.current = [];
@@ -672,18 +601,11 @@ export default function App() {
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const dest = audioCtx.createMediaStreamDestination();
-
       if (videoRef.current) {
         const videoAudio = audioCtx.createMediaElementSource(videoRef.current);
         videoAudio.connect(dest);
         videoAudio.connect(audioCtx.destination);
       }
-      if (audioRef.current && bgAudioSrc) {
-        const bgAudio = audioCtx.createMediaElementSource(audioRef.current);
-        bgAudio.connect(dest);
-        bgAudio.connect(audioCtx.destination);
-      }
-
       const combinedTracks = [...stream.getVideoTracks(), ...dest.stream.getAudioTracks()];
       mediaRecorderRef.current = new MediaRecorder(new MediaStream(combinedTracks), {
         mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm',
@@ -713,7 +635,6 @@ export default function App() {
     videoRef.current.currentTime = clips[0]?.trimStart || 0;
     videoRef.current.play();
     if (audioRef.current) audioRef.current.play();
-    pipVideoOverlays.forEach((p) => p.videoElement?.play().catch(() => {}));
     mediaRecorderRef.current.start(100);
 
     let simulatedProgress = 5;
@@ -734,41 +655,271 @@ export default function App() {
     }, totalDurationMs + 500);
   };
 
-  if (!session) {
+  // --- RENDERING VIEWS ---
+
+  // 1. HOME / LANDING PAGE VIEW
+  if (view === 'home') {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#111216]">
-        <div className="w-full max-w-sm rounded-2xl bg-[#191a20] p-6 border border-gray-800 text-center shadow-2xl">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-lg">
-            <Video size={28} />
+      <div className="flex min-h-screen flex-col bg-[#0b0c10] text-white font-sans select-none">
+        {/* Navbar */}
+        <header className="flex h-16 items-center justify-between border-b border-[#23242c] bg-[#121318] px-8">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+            <div className="h-8 w-8 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">C</div>
+            <span className="font-bold text-sm tracking-wide">CloudCut Studio</span>
           </div>
-          <h2 className="text-xl font-bold text-white">CloudCut Studio</h2>
-          <div className="mt-6 flex flex-col gap-2.5">
-            <button
+          <div className="flex items-center gap-6 text-xs font-semibold text-gray-300">
+            <button onClick={() => setView('home')} className="hover:text-white transition">Home</button>
+            <button onClick={() => setView('pricing')} className="hover:text-white transition">Pricing</button>
+            {session && profile?.role === 'admin' && (
+              <button onClick={() => setView('admin')} className="text-amber-400 hover:text-amber-300 flex items-center gap-1">
+                <ShieldAlert size={14} /> Admin Panel
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {session ? (
+              <div className="flex items-center gap-3">
+                <span className="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-full border border-indigo-500/30 font-medium">
+                  {profile?.plan === 'PRO' ? '⭐ PRO Member' : `Free Edits: ${profile?.edits_count || 0}/3`}
+                </span>
+                <button onClick={() => setView('editor')} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 shadow-md">
+                  Open Editor
+                </button>
+                <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-white"><LogOut size={16} /></button>
+              </div>
+            ) : (
+              <>
+                <button onClick={() => { setIsSignUp(false); setShowAuthModal(true); }} className="text-xs font-semibold text-gray-300 hover:text-white px-3 py-2">
+                  Log in
+                </button>
+                <button onClick={() => { setIsSignUp(true); setShowAuthModal(true); }} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 shadow-md">
+                  Sign up
+                </button>
+              </>
+            )}
+          </div>
+        </header>
+
+        {/* Hero Section */}
+        <section className="flex flex-1 flex-col items-center justify-center px-4 py-20 text-center bg-gradient-to-b from-[#121318] to-[#0b0c10]">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold mb-6 animate-pulse">
+            <Sparkles size={14} /> Next-Gen Browser Video Editing Suite
+          </div>
+          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight max-w-3xl leading-tight">
+            Effortless editing. <span className="text-indigo-500">Unskippable videos.</span>
+          </h1>
+          <p className="mt-4 text-sm md:text-base text-gray-400 max-w-xl">
+            Create multi-clip timelines, add cinematic LUTs, auto-captions, and PiP overlays directly in your browser. Free users get up to 3 video edits with 1-minute lengths.
+          </p>
+          <div className="mt-8 flex gap-4">
+            <button 
               onClick={() => {
-                setSession({ user: { id: 'admin-123', email: 'admin@studio.com' } });
-                setProfile({ id: 'admin-123', email: 'admin@studio.com', role: 'admin', plan: 'PRO' });
-              }}
-              className="w-full rounded-xl bg-amber-500 py-2.5 text-xs font-bold text-black hover:bg-amber-400 flex items-center justify-center gap-1.5"
+                if (!session) setShowAuthModal(true);
+                else setView('editor');
+              }} 
+              className="rounded-2xl bg-indigo-600 px-6 py-3.5 text-sm font-bold text-white hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5"
             >
-              <ShieldAlert size={14} /> Launch as Site Admin (PRO)
+              Get Started Free &gt;
             </button>
-            <button
-              onClick={() => {
-                setSession({ user: { id: 'user-free', email: 'freeuser@test.com' } });
-                setProfile({ id: 'user-free', email: 'freeuser@test.com', role: 'user', plan: 'FREE' });
-              }}
-              className="w-full rounded-xl bg-gray-800 py-2.5 text-xs font-semibold text-gray-300 hover:bg-gray-700 hover:text-white border border-gray-700"
-            >
-              Launch as Normal Free User
+            <button onClick={() => setView('pricing')} className="rounded-2xl bg-[#191a20] border border-gray-800 px-6 py-3.5 text-sm font-bold text-gray-300 hover:text-white hover:bg-[#20212b] transition">
+              View Pricing Plans
             </button>
           </div>
-        </div>
+        </section>
+
+        {/* Auth Modal */}
+        {showAuthModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md rounded-3xl bg-[#16171d] p-8 border border-gray-800 shadow-2xl relative">
+              <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white">✕</button>
+              <h2 className="text-xl font-bold text-white mb-2">{isSignUp ? 'Create an Account' : 'Welcome Back'}</h2>
+              <p className="text-xs text-gray-400 mb-6">Account login is mandatory to access the video editor and manage your projects.</p>
+              
+              <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-1">Email Address</label>
+                  <input 
+                    type="email" 
+                    required
+                    value={authEmail} 
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="user@example.com"
+                    className="w-full rounded-xl bg-[#101115] border border-gray-800 px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-1">Password</label>
+                  <input 
+                    type="password" 
+                    required
+                    value={authPassword} 
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full rounded-xl bg-[#101115] border border-gray-800 px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <button type="submit" className="w-full rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-500 shadow-md">
+                  {isSignUp ? 'Sign Up & Start Editing' : 'Log In to Editor'}
+                </button>
+              </form>
+
+              <div className="mt-4 text-center">
+                <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-indigo-400 hover:underline">
+                  {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
+  // 2. PRICING PAGE VIEW
+  if (view === 'pricing') {
+    return (
+      <div className="flex min-h-screen flex-col bg-[#0b0c10] text-white font-sans select-none">
+        <header className="flex h-16 items-center justify-between border-b border-[#23242c] bg-[#121318] px-8">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+            <div className="h-8 w-8 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg">C</div>
+            <span className="font-bold text-sm tracking-wide">CloudCut Studio</span>
+          </div>
+          <div className="flex items-center gap-6 text-xs font-semibold text-gray-300">
+            <button onClick={() => setView('home')} className="hover:text-white transition">Home</button>
+            <button onClick={() => setView('pricing')} className="text-indigo-400 font-bold">Pricing</button>
+          </div>
+          <button onClick={() => setView('editor')} className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500">
+            Back to Editor
+          </button>
+        </header>
+
+        <section className="flex flex-1 flex-col items-center py-16 px-4">
+          <h2 className="text-3xl md:text-5xl font-extrabold text-center">Simple, Transparent Pricing</h2>
+          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Upgrade to PRO via Razorpay to instantly unlock your dashboard and enjoy unlimited rendering power.</p>
+
+          <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
+            {/* Free Plan */}
+            <div className="rounded-3xl bg-[#16171d] border border-gray-800 p-8 flex flex-col justify-between shadow-xl">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Free Tier</span>
+                <h3 className="text-2xl font-bold mt-2">₹0 <span className="text-xs font-normal text-gray-400">/ forever</span></h3>
+                <ul className="mt-6 space-y-3 text-xs text-gray-300">
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-indigo-500" /> Up to 3 video edits</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-indigo-500" /> Max 1-minute video length</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-indigo-500" /> 720p HD Exports</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-indigo-500" /> Standard Timeline & Split tools</li>
+                </ul>
+              </div>
+              <button 
+                onClick={() => {
+                  if (!session) setShowAuthModal(true);
+                  else setView('editor');
+                }} 
+                className="mt-8 w-full rounded-xl bg-gray-800 py-3 text-xs font-bold text-gray-200 hover:bg-gray-700"
+              >
+                {session ? 'Current Free Plan' : 'Get Started Free'}
+              </button>
+            </div>
+
+            {/* PRO Plan */}
+            <div className="rounded-3xl bg-gradient-to-b from-indigo-950/40 to-[#16171d] border-2 border-indigo-500/50 p-8 flex flex-col justify-between shadow-2xl relative overflow-hidden">
+              <div className="absolute top-4 right-4 bg-indigo-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                Most Popular
+              </div>
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1"><Crown size={14} /> PRO Lifetime</span>
+                <h3 className="text-2xl font-bold mt-2">₹799 <span className="text-xs font-normal text-gray-400">/ one-time</span></h3>
+                <ul className="mt-6 space-y-3 text-xs text-gray-300">
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-400" /> Unlimited video edits</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-400" /> Unlimited video duration</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-400" /> 1080p Full HD & 2K Cinematic Exports</li>
+                  <li className="flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-400" /> Advanced Chroma Key & PiP Video Overlays</li>
+                </ul>
+              </div>
+              <button 
+                onClick={() => {
+                  if (!session) {
+                    setShowAuthModal(true);
+                  } else {
+                    handleUpgradePro();
+                  }
+                }}
+                className="mt-8 w-full rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-500 shadow-lg shadow-indigo-600/30"
+              >
+                {isPro ? '⭐ PRO Active' : 'Upgrade & Unlock PRO ⚡'}
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // 3. ADMIN PANEL VIEW
   if (view === 'admin') {
     return <AdminDashboard onBack={() => { setView('editor'); if (session) fetchProfile(session.user.id); }} />;
+  }
+
+  // 4. EDITOR VIEW (Mandatory Login Guard)
+  if (!session) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[#0b0c10]">
+        <div className="w-full max-w-sm rounded-3xl bg-[#16171d] p-8 border border-gray-800 text-center shadow-2xl">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg">
+            <Lock size={22} />
+          </div>
+          <h2 className="text-xl font-bold text-white">Login Required</h2>
+          <p className="text-xs text-gray-400 mt-2 mb-6">Account login is mandatory to access CloudCut Studio's video editor and track your free edit allocations.</p>
+          <button onClick={() => setShowAuthModal(true)} className="w-full rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-500 shadow-md">
+            Log In or Sign Up
+          </button>
+          <button onClick={() => setView('home')} className="mt-3 w-full text-xs text-gray-400 hover:text-white py-2">
+            &larr; Back to Home
+          </button>
+
+          {showAuthModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+              <div className="w-full max-w-md rounded-3xl bg-[#16171d] p-8 border border-gray-800 shadow-2xl relative text-left">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white">✕</button>
+                <h2 className="text-xl font-bold text-white mb-2">{isSignUp ? 'Create an Account' : 'Welcome Back'}</h2>
+                <form onSubmit={handleAuthSubmit} className="space-y-4 mt-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">Email Address</label>
+                    <input 
+                      type="email" 
+                      required
+                      value={authEmail} 
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="w-full rounded-xl bg-[#101115] border border-gray-800 px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">Password</label>
+                    <input 
+                      type="password" 
+                      required
+                      value={authPassword} 
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full rounded-xl bg-[#101115] border border-gray-800 px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <button type="submit" className="w-full rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-500 shadow-md">
+                    {isSignUp ? 'Sign Up & Start Editing' : 'Log In'}
+                  </button>
+                </form>
+                <div className="mt-4 text-center">
+                  <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-indigo-400 hover:underline">
+                    {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -778,47 +929,34 @@ export default function App() {
       {/* Top Navbar */}
       <header className="flex h-12 items-center justify-between border-b border-[#23242c] bg-[#16171d] px-4">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold">
-              C
-            </div>
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+            <div className="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold">C</div>
             <span className="font-semibold text-xs text-white tracking-wide">CloudCut Editor</span>
             <button 
               onClick={handleUpgradePro}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
-                isPro 
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
-                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 animate-pulse'
+              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
+                isPro ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 animate-pulse'
               }`}
-              title="Click to Upgrade via Razorpay"
             >
               {isPro ? 'PRO Active ⭐' : 'Upgrade to PRO ⚡'}
             </button>
           </div>
 
           <div className="h-4 w-[1px] bg-gray-700" />
-
-          {/* Aspect Ratio Presets */}
           <div className="flex items-center bg-[#101115] p-0.5 rounded-lg border border-gray-800 text-xs">
             {['16:9', '9:16', '1:1', '4:5'].map((r) => (
-              <button
-                key={r}
-                onClick={() => setAspectRatio(r)}
-                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${aspectRatio === r ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
-              >
+              <button key={r} onClick={() => setAspectRatio(r)} className={`px-2 py-0.5 rounded text-[10px] font-semibold transition ${aspectRatio === r ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
                 {r}
               </button>
             ))}
           </div>
 
           <div className="h-4 w-[1px] bg-gray-700" />
-
-          {/* Project Save & Load */}
           <div className="flex items-center gap-1">
-            <button onClick={handleSaveProjectFile} className="flex items-center gap-1 text-xs text-gray-300 hover:text-white bg-[#1a1b22] px-2.5 py-1 rounded border border-gray-800" title="Save Project (.cloudcut)">
-              <Save size={13} /> Save Project
+            <button onClick={handleSaveProjectFile} className="flex items-center gap-1 text-xs text-gray-300 hover:text-white bg-[#1a1b22] px-2.5 py-1 rounded border border-gray-800">
+              <Save size={13} /> Save
             </button>
-            <label className="flex items-center gap-1 text-xs text-gray-300 hover:text-white bg-[#1a1b22] px-2.5 py-1 rounded border border-gray-800 cursor-pointer" title="Load Project (.cloudcut)">
+            <label className="flex items-center gap-1 text-xs text-gray-300 hover:text-white bg-[#1a1b22] px-2.5 py-1 rounded border border-gray-800 cursor-pointer">
               <FolderOpen size={13} /> Open
               <input type="file" accept=".cloudcut,.json" className="hidden" onChange={handleLoadProjectFile} />
             </label>
@@ -827,59 +965,25 @@ export default function App() {
 
         <div className="flex items-center gap-3">
           {profile?.role === 'admin' && (
-            <button 
-              onClick={() => setView('admin')} 
-              className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-300 hover:bg-amber-500/25"
-            >
+            <button onClick={() => setView('admin')} className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-300">
               <ShieldAlert size={14} /> Admin Panel
             </button>
           )}
 
-          {/* Tiered Export Resolution Buttons */}
+          {/* Tiered Resolution Buttons */}
           <div className="flex items-center bg-[#101115] border border-gray-800 rounded-lg p-0.5 text-xs">
-            <button
-              onClick={() => setExportResolution('720p')}
-              className={`px-2.5 py-1 rounded font-semibold transition ${exportResolution === '720p' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
+            <button onClick={() => setExportResolution('720p')} className={`px-2.5 py-1 rounded font-semibold transition ${exportResolution === '720p' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               720p HD
             </button>
-            <button
-              onClick={() => {
-                if (!isPro) {
-                  handleUpgradePro();
-                } else {
-                  setExportResolution('1080p');
-                }
-              }}
-              className={`px-2.5 py-1 rounded font-semibold transition flex items-center gap-1 ${exportResolution === '1080p' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
+            <button onClick={() => { if (!isPro) handleUpgradePro(); else setExportResolution('1080p'); }} className={`px-2.5 py-1 rounded font-semibold transition flex items-center gap-1 ${exportResolution === '1080p' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               1080p {!isPro && '🔒'}
             </button>
-            <button
-              onClick={() => {
-                if (!isPro) {
-                  handleUpgradePro();
-                } else {
-                  setExportResolution('2k');
-                }
-              }}
-              className={`px-2.5 py-1 rounded font-semibold transition flex items-center gap-1 ${exportResolution === '2k' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
+            <button onClick={() => { if (!isPro) handleUpgradePro(); else setExportResolution('2k'); }} className={`px-2.5 py-1 rounded font-semibold transition flex items-center gap-1 ${exportResolution === '2k' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               2K {!isPro && '🔒'}
             </button>
           </div>
 
-          {/* Export Format Selector */}
-          <div className="flex bg-[#101115] p-0.5 rounded-lg border border-gray-800 text-[10px] font-bold">
-            <button onClick={() => setExportFormat('mp4')} className={`px-2 py-0.5 rounded ${exportFormat === 'mp4' ? 'bg-indigo-600 text-white' : 'text-gray-400'}`}>MP4</button>
-            <button onClick={() => setExportFormat('webm')} className={`px-2 py-0.5 rounded ${exportFormat === 'webm' ? 'bg-indigo-600 text-white' : 'text-gray-400'}`}>WEBM</button>
-          </div>
-
-          <button 
-            onClick={startClientSideExport}
-            disabled={isExporting || !clips.length}
-            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1 text-xs font-bold text-white hover:bg-indigo-500 shadow-sm shadow-indigo-600/20 disabled:opacity-40"
-          >
+          <button onClick={startClientSideExport} disabled={isExporting || !clips.length} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40">
             <Download size={14} /> {isExporting ? `Exporting (${exportProgress}%)` : `Export ${exportResolution}`}
           </button>
           <div className="h-4 w-[1px] bg-gray-700" />
@@ -887,36 +991,29 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Workspace */}
+      {/* Main Workspace Layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left Toolbar */}
         <aside className="flex w-14 flex-col items-center border-r border-[#23242c] bg-[#121318] py-3 gap-5 shrink-0">
           <button onClick={() => setSidebarTab('media')} className={`p-2 rounded-xl transition ${sidebarTab === 'media' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Media">
             <FolderPlus size={18} />
           </button>
-          <button onClick={() => setSidebarTab('pip')} className={`p-2 rounded-xl transition ${sidebarTab === 'pip' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="PiP Video Overlay">
+          <button onClick={() => setSidebarTab('pip')} className={`p-2 rounded-xl transition ${sidebarTab === 'pip' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="PiP Video">
             <Video size={18} />
           </button>
-          <button onClick={() => setSidebarTab('audio')} className={`p-2 rounded-xl transition ${sidebarTab === 'audio' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Audio & Music">
+          <button onClick={() => setSidebarTab('audio')} className={`p-2 rounded-xl transition ${sidebarTab === 'audio' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Audio">
             <Music size={18} />
           </button>
-          <button onClick={() => setSidebarTab('captions')} className={`p-2 rounded-xl transition ${sidebarTab === 'captions' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Auto-Captions">
+          <button onClick={() => setSidebarTab('captions')} className={`p-2 rounded-xl transition ${sidebarTab === 'captions' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Captions">
             <Subtitles size={18} />
-          </button>
-          <button onClick={() => setSidebarTab('text')} className={`p-2 rounded-xl transition ${sidebarTab === 'text' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`} title="Text">
-            <Type size={18} />
           </button>
         </aside>
 
-        {/* Drawer Controls Panel */}
+        {/* Drawer Panel */}
         <aside className="w-88 border-r border-[#23242c] bg-[#16171d] flex flex-col shrink-0">
           <div className="flex h-10 border-b border-[#23242c] bg-[#14151a] px-3 items-center justify-between text-xs text-gray-400">
             {['Effects', 'Transform', 'Adjust', 'Speed'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setTopSubTab(tab)}
-                className={`px-2 py-1 font-medium transition ${topSubTab === tab ? 'text-white border-b-2 border-indigo-500 font-semibold' : 'hover:text-gray-200'}`}
-              >
+              <button key={tab} onClick={() => setTopSubTab(tab)} className={`px-2 py-1 font-medium transition ${topSubTab === tab ? 'text-white border-b-2 border-indigo-500 font-semibold' : 'hover:text-gray-200'}`}>
                 {tab}
               </button>
             ))}
@@ -931,11 +1028,7 @@ export default function App() {
                   </span>
                   <div className="grid grid-cols-2 gap-2">
                     {TRANSITIONS.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => setActiveTransition(t.id)}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition ${activeTransition === t.id ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-[#272832] bg-[#1c1d25] text-gray-300 hover:bg-[#252632]'}`}
-                      >
+                      <button key={t.id} onClick={() => setActiveTransition(t.id)} className={`p-2.5 rounded-xl border text-xs font-semibold text-center transition ${activeTransition === t.id ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-[#272832] bg-[#1c1d25] text-gray-300'}`}>
                         {t.label}
                       </button>
                     ))}
@@ -948,11 +1041,7 @@ export default function App() {
                   </span>
                   <div className="space-y-1.5">
                     {CINEMATIC_LUTS.map((lut) => (
-                      <button
-                        key={lut.id}
-                        onClick={() => setActiveLut(lut.id)}
-                        className={`w-full p-2 rounded-lg border text-xs font-semibold flex items-center justify-between transition ${activeLut === lut.id ? 'border-amber-500 bg-amber-500/10 text-amber-300' : 'border-[#272832] bg-[#1c1d25] text-gray-400 hover:text-white'}`}
-                      >
+                      <button key={lut.id} onClick={() => setActiveLut(lut.id)} className={`w-full p-2 rounded-lg border text-xs font-semibold flex items-center justify-between transition ${activeLut === lut.id ? 'border-amber-500 bg-amber-500/10 text-amber-300' : 'border-[#272832] bg-[#1c1d25] text-gray-400'}`}>
                         <span>{lut.label}</span>
                         {activeLut === lut.id && <Check size={14} />}
                       </button>
@@ -965,29 +1054,18 @@ export default function App() {
             {sidebarTab === 'captions' && (
               <div className="space-y-4">
                 <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Auto-Speech Captions</span>
-                <button
-                  onClick={startAutoCaptions}
-                  disabled={isTranscribing || !clips.length}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  <Mic size={15} /> {isTranscribing ? 'Listening & Transcribing...' : 'Generate Auto-Captions'}
+                <button onClick={startAutoCaptions} disabled={isTranscribing || !clips.length} className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50">
+                  <Mic size={15} /> {isTranscribing ? 'Listening...' : 'Generate Auto-Captions'}
                 </button>
-
-                <div className="space-y-1.5 pt-2 border-t border-gray-800">
-                  <span className="text-[11px] font-semibold text-gray-400 uppercase block">Generated Lines ({subtitles.length})</span>
-                  {subtitles.map((s) => (
-                    <div key={s.id} className="p-2 rounded-lg border border-[#272832] bg-[#1c1d25] text-xs">
-                      <p className="font-semibold text-yellow-400 truncate">{s.text}</p>
-                      <span className="text-[10px] text-gray-500">{formatTime(s.start)} - {formatTime(s.end)}</span>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
             {sidebarTab === 'media' && (
               <div className="space-y-4">
                 <span className="text-xs font-bold uppercase tracking-wider text-gray-400 block">Video Tracks</span>
+                <div className="text-[11px] text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 p-2 rounded-lg">
+                  {isPro ? '⭐ PRO: Unlimited clips & duration' : `Free User: ${profile?.edits_count || 0}/3 Edits Used (Max 1 min)`}
+                </div>
                 <label className="flex h-24 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-700 bg-[#1c1d25] p-3 text-center hover:border-indigo-500 transition">
                   <Video size={20} className="text-gray-500 mb-1" />
                   <span className="text-xs text-gray-300 font-medium">Add Video Clips</span>
@@ -1012,15 +1090,8 @@ export default function App() {
                 else setIsPlaying(false);
               }}
             />
-
             {clips.length > 0 ? (
-              <canvas
-                ref={canvasRef}
-                onMouseDown={handleCanvasMouseDown}
-                onMouseMove={handleCanvasMouseMove}
-                onMouseUp={handleCanvasMouseUp}
-                className="h-full w-full object-contain cursor-crosshair"
-              />
+              <canvas ref={canvasRef} onMouseDown={handleCanvasMouseDown} onMouseMove={handleCanvasMouseMove} onMouseUp={handleCanvasMouseUp} className="h-full w-full object-contain cursor-crosshair" />
             ) : (
               <div className="text-center text-gray-600">
                 <Film size={36} className="mx-auto mb-2 opacity-40" />
@@ -1031,25 +1102,21 @@ export default function App() {
         </main>
       </div>
 
-      {/* Multi-Track Timeline with Continuous Proportional Blocks and Smooth Playhead */}
+      {/* Timeline Footer */}
       <footer className="h-48 border-t border-[#23242c] bg-[#121318] flex flex-col shrink-0">
         <div className="flex h-9 items-center justify-between border-b border-[#23242c] bg-[#16171d] px-4">
           <div className="flex items-center gap-2">
-            {/* Play / Pause */}
-            <button onClick={togglePlay} disabled={!clips.length} className="p-1 text-white hover:text-indigo-400" title="Play / Pause">
+            <button onClick={togglePlay} disabled={!clips.length} className="p-1 text-white hover:text-indigo-400" title="Play/Pause">
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
-            {/* Stop & Reset */}
-            <button onClick={handleStop} disabled={!clips.length} className="p-1 text-gray-300 hover:text-red-400" title="Stop & Reset">
+            <button onClick={handleStop} disabled={!clips.length} className="p-1 text-gray-300 hover:text-red-400" title="Stop">
               <RotateCcw size={15} />
             </button>
-            {/* Split */}
             <button onClick={handleSplitClip} disabled={!clips.length} className="flex items-center gap-1 text-xs text-gray-300 hover:text-white px-2 py-0.5 rounded hover:bg-gray-800">
               <Scissors size={13} /> Split
             </button>
-            {/* Delete Clip */}
             <button onClick={handleDeleteClip} disabled={!clips.length} className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 px-2 py-0.5 rounded hover:bg-red-500/10">
-              <Trash2 size={13} /> Delete Clip
+              <Trash2 size={13} /> Delete
             </button>
           </div>
 
@@ -1063,68 +1130,24 @@ export default function App() {
           </div>
         </div>
 
-        {/* Proportional Scrubbable Timeline */}
-        <div 
-          ref={timelineRef} 
-          onMouseDown={(e) => {
-            setIsScrubbing(true);
-            handleScrub(e);
-          }}
-          onMouseMove={(e) => {
-            if (isScrubbing) handleScrub(e);
-          }}
-          onMouseUp={() => setIsScrubbing(false)}
-          onMouseLeave={() => setIsScrubbing(false)}
-          className="relative flex-1 p-3 bg-[#0d0e12] flex flex-col justify-center cursor-ew-resize select-none overflow-hidden"
-        >
-          {/* Red Playhead Indicator */}
-          <div 
-            className="absolute top-0 bottom-0 w-[2px] bg-red-500 pointer-events-none z-30 flex flex-col items-center"
-            style={{ 
-              left: `${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}%`,
-              transition: isPlaying ? 'none' : 'left 0.05s linear'
-            }}
-          >
+        {/* Timeline Tracks */}
+        <div ref={timelineRef} onMouseDown={(e) => { setIsScrubbing(true); handleScrub(e); }} onMouseMove={(e) => { if (isScrubbing) handleScrub(e); }} onMouseUp={() => setIsScrubbing(false)} onMouseLeave={() => setIsScrubbing(false)} className="relative flex-1 p-3 bg-[#0d0e12] flex flex-col justify-center cursor-ew-resize select-none overflow-hidden">
+          <div className="absolute top-0 bottom-0 w-[2px] bg-red-500 pointer-events-none z-30 flex flex-col items-center" style={{ left: `${totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0}%` }}>
             <div className="w-3 h-3 bg-red-500 rotate-45 -mt-1 shadow-md shadow-red-500/50" />
           </div>
 
-          {/* Connected Proportional Clips */}
           <div className="relative flex w-full h-16 bg-[#16171d] rounded-lg overflow-hidden border border-gray-800 z-10">
             {clips.map((clip, idx) => {
               const clipDur = clip.trimEnd - clip.trimStart;
               const widthPct = totalDuration > 0 ? (clipDur / totalDuration) * 100 : 100;
-
               return (
-                <div
-                  key={clip.id}
-                  onClick={(e) => { e.stopPropagation(); setActiveClipIndex(idx); }}
-                  style={{ width: `${widthPct}%` }}
-                  className={`relative h-full border-r border-gray-900/80 flex items-center justify-between px-2 transition-colors ${
-                    activeClipIndex === idx 
-                      ? 'bg-amber-500/20 border-b-2 border-b-amber-400 text-white' 
-                      : 'bg-[#1c1d25] hover:bg-[#232430] text-gray-400'
-                  }`}
-                >
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'start', 0.5); }}
-                    className="h-full w-2 hover:w-3 bg-gray-700/60 hover:bg-amber-500 rounded-l text-[8px] text-gray-300 flex items-center justify-center cursor-ew-resize transition-all"
-                    title="Trim Start (+0.5s)"
-                  >
-                    |
-                  </button>
-
+                <div key={clip.id} onClick={(e) => { e.stopPropagation(); setActiveClipIndex(idx); }} style={{ width: `${widthPct}%` }} className={`relative h-full border-r border-gray-900/80 flex items-center justify-between px-2 transition-colors ${activeClipIndex === idx ? 'bg-amber-500/20 border-b-2 border-b-amber-400 text-white' : 'bg-[#1c1d25] text-gray-400'}`}>
+                  <button onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'start', 0.5); }} className="h-full w-2 bg-gray-700/60 hover:bg-amber-500 rounded-l text-[8px] text-gray-300 flex items-center justify-center cursor-ew-resize">|</button>
                   <div className="flex flex-col items-center truncate px-1 pointer-events-none">
                     <span className="text-[10px] font-semibold truncate">{clip.name}</span>
                     <span className="text-[9px] font-mono text-gray-400">{formatTime(clipDur)}</span>
                   </div>
-
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'end', -0.5); }}
-                    className="h-full w-2 hover:w-3 bg-gray-700/60 hover:bg-amber-500 rounded-r text-[8px] text-gray-300 flex items-center justify-center cursor-ew-resize transition-all"
-                    title="Trim End (-0.5s)"
-                  >
-                    |
-                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'end', -0.5); }} className="h-full w-2 bg-gray-700/60 hover:bg-amber-500 rounded-r text-[8px] text-gray-300 flex items-center justify-center cursor-ew-resize">|</button>
                 </div>
               );
             })}
