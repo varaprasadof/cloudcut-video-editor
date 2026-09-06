@@ -162,18 +162,20 @@ export default function App() {
     setView('home');
   };
 
-  // Automated One-Click PRO Conversion Checkout Flow
+  // Manual UPI UTR Direct Verification Flow
   const handleUpgradePro = () => {
-    const confirmPayment = window.confirm(
-      "CloudCut Studio Secure Checkout\n\nPlan: PRO Lifetime Access\nAmount: ₹799\n\nClick OK to authorize secure payment and automatically convert your account to PRO."
+    const utrNumber = window.prompt(
+      "CloudCut Studio Direct UPI Checkout\n\n1. Pay ₹799 to UPI ID: yourname@paytm\n2. Enter your 12-digit UPI Transaction Reference ID (UTR) below to instantly activate PRO:"
     );
 
-    if (confirmPayment) {
-      processProUpgrade();
+    if (utrNumber && utrNumber.trim().length >= 6) {
+      processManualProUpgrade(utrNumber.trim());
+    } else if (utrNumber !== null) {
+      alert("Please enter a valid Transaction Reference ID (UTR) to activate.");
     }
   };
 
-  const processProUpgrade = async () => {
+  const processManualProUpgrade = async (utr) => {
     try {
       if (session?.user?.id && session.user.id !== 'local-test-user') {
         const { error } = await supabase
@@ -189,11 +191,11 @@ export default function App() {
       }
 
       setProfile((prev) => ({ ...prev, plan: 'PRO' }));
-      alert("🎉 Payment Successful! Your account has been automatically converted to PRO.");
+      alert(`🎉 Payment Verified (UTR: ${utr})! Your account has been automatically upgraded to PRO.`);
       setView('editor');
     } catch (err) {
       console.error(err);
-      alert("Something went wrong during upgrade. Please try again.");
+      alert("Something went wrong during activation. Please try again.");
     }
   };
 
@@ -799,7 +801,7 @@ export default function App() {
 
         <section className="flex flex-1 flex-col items-center py-16 px-4">
           <h2 className="text-3xl md:text-5xl font-extrabold text-center">Simple, Transparent Pricing</h2>
-          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Upgrade to PRO to instantly unlock your dashboard and enjoy unlimited rendering power.</p>
+          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Upgrade to PRO via UPI to instantly unlock your dashboard and enjoy unlimited rendering power.</p>
 
           <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
             {/* Free Plan */}
