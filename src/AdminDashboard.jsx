@@ -27,17 +27,24 @@ export default function AdminDashboard({ onBack }) {
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (!error && data) setProfiles(data);
+    if (error) {
+      console.error('Error fetching profiles:', error.message);
+    } else {
+      setProfiles(data || []);
+    }
   };
 
-  // 2. Fetch pending UTR payment requests
+  // 2. Fetch all payments safely without strict filters
   const fetchPendingPayments = async () => {
     const { data, error } = await supabase
       .from('payments')
-      .select('*')
-      .eq('status', 'pending');
+      .select('*');
 
-    if (!error && data) setPendingPayments(data);
+    if (error) {
+      console.error('Error fetching payments:', error.message);
+    } else {
+      setPendingPayments(data || []);
+    }
   };
 
   // Approve a pending UTR request and upgrade user to PRO
@@ -51,12 +58,14 @@ export default function AdminDashboard({ onBack }) {
 
       if (payError) throw payError;
 
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ plan: 'PRO' })
-        .eq('id', userId);
+      if (userId) {
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .update({ plan: 'PRO' })
+          .eq('id', userId);
 
-      if (profileError) throw profileError;
+        if (profileError) throw profileError;
+      }
 
       alert('🎉 UTR approved and user successfully upgraded to PRO!');
       fetchAllData();
@@ -123,7 +132,7 @@ export default function AdminDashboard({ onBack }) {
         {/* Metric Cards */}
         <div className="grid grid-cols-4 gap-6 mb-8">
           <div className="rounded-2xl border border-gray-800 bg-[#16171d] p-5 shadow-lg">
-            <span className="text-xs text-gray-400 uppercase tracking-wider">Pending UTRs</span>
+            <span className="text-xs text-gray-400 uppercase tracking-wider">Total UTRs</span>
             <p className="mt-2 text-3xl font-bold text-amber-400">{pendingPayments.length}</p>
           </div>
           <div className="rounded-2xl border border-gray-800 bg-[#16171d] p-5 shadow-lg">
@@ -150,7 +159,7 @@ export default function AdminDashboard({ onBack }) {
                 : 'bg-[#16171d] text-gray-400 hover:text-white border border-gray-800'
             }`}
           >
-            ⏳ Pending UTR Approvals ({pendingPayments.length})
+            ⏳ UTR Approvals ({pendingPayments.length})
           </button>
           <button
             onClick={() => setActiveTab('users')}
@@ -164,15 +173,15 @@ export default function AdminDashboard({ onBack }) {
           </button>
         </div>
 
-        {/* TAB 1: PENDING UTR REQUESTS */}
+        {/* TAB 1: UTR REQUESTS */}
         {activeTab === 'utr' && (
           <div className="space-y-4">
             <h2 className="text-lg font-bold text-white mb-2">Customer UTR Verification Requests</h2>
             {pendingPayments.length === 0 ? (
               <div className="rounded-2xl bg-[#16171d] border border-gray-800 p-12 text-center shadow-xl">
                 <CheckCircle size={40} className="mx-auto text-emerald-500 mb-3 opacity-80" />
-                <h3 className="text-sm font-bold text-white">No Pending Payments</h3>
-                <p className="text-xs text-gray-400 mt-1">All customer UPI payments have been verified and processed.</p>
+                <h3 className="text-sm font-bold text-white">No Payment Requests</h3>
+                <p className="text-xs text-gray-400 mt-1">There are no payment records found in the database.</p>
               </div>
             ) : (
               pendingPayments.map((item) => (
@@ -181,6 +190,9 @@ export default function AdminDashboard({ onBack }) {
                     <div className="flex items-center gap-2 text-xs text-gray-300">
                       <User size={14} className="text-indigo-400" />
                       <span className="font-semibold text-white">{item.email}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-bold ${item.status === 'approved' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'}`}>
+                        {item.status || 'pending'}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs font-mono text-amber-400">
                       <FileText size={14} /> UTR Code: <span className="bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-white font-bold">{item.utr}</span>
@@ -188,13 +200,15 @@ export default function AdminDashboard({ onBack }) {
                     <div className="text-[10px] text-gray-500">Submitted: {new Date(item.created_at).toLocaleString()}</div>
                   </div>
 
-                  <button
-                    onClick={() => handleApproveUtr(item.id, item.user_id)}
-                    disabled={updatingId === item.id}
-                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 shadow-lg shadow-emerald-600/20 transition transform hover:-translate-y-0.5 disabled:opacity-50"
-                  >
-                    <Check size={16} /> {updatingId === item.id ? 'Approving...' : 'Approve & Upgrade to PRO'}
-                  </button>
+                  {item.status !== 'approved' && (
+                    <button
+                      onClick={() => handleApproveUtr(item.id, item.user_id)}
+                      disabled={updatingId === item.id}
+                      className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-500 shadow-lg shadow-emerald-600/20 transition transform hover:-translate-y-0.5 disabled:opacity-50"
+                    >
+                      <Check size={16} /> {updatingId === item.id ? 'Approving...' : 'Approve & Upgrade to PRO'}
+                    </button>
+                  )}
                 </div>
               ))
             )}
