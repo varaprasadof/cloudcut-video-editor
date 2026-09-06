@@ -112,21 +112,36 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setSession(session);
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user.email);
       }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session) {
         setSession(session);
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.user.email);
       }
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (id) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', id).single();
-    if (data) setProfile(data);
+  const fetchProfile = async (userId, userEmail) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    
+    if (data) {
+      setProfile(data);
+    } else {
+      const isAdmin = userEmail === 'varaprasadn8499@gmail.com';
+      const newProfile = {
+        id: userId,
+        email: userEmail,
+        role: isAdmin ? 'admin' : 'user',
+        plan: 'FREE',
+        edits_count: 0
+      };
+      
+      await supabase.from('profiles').insert([newProfile]);
+      setProfile(newProfile);
+    }
   };
 
   const handleAuthSubmit = async (e) => {
@@ -137,19 +152,20 @@ export default function App() {
         if (error) throw error;
         const userId = data?.user?.id || 'mock-user-id';
         setSession({ user: { id: userId, email: authEmail } });
-        setProfile({ id: userId, email: authEmail, plan: 'FREE', edits_count: 0, role: 'user' });
+        fetchProfile(userId, authEmail);
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
         if (error) throw error;
         setSession(data.session);
-        fetchProfile(data.user.id);
+        fetchProfile(data.user.id, data.user.email);
       }
       setShowAuthModal(false);
       setView('editor');
     } catch (err) {
       console.warn("Supabase auth fallback active:", err.message);
+      const isAdmin = authEmail === 'varaprasadn8499@gmail.com';
       setSession({ user: { id: 'local-test-user', email: authEmail } });
-      setProfile({ id: 'local-test-user', email: authEmail, plan: 'FREE', edits_count: 0, role: 'user' });
+      setProfile({ id: 'local-test-user', email: authEmail, role: isAdmin ? 'admin' : 'user', plan: 'FREE', edits_count: 0 });
       setShowAuthModal(false);
       setView('editor');
     }
@@ -255,7 +271,7 @@ export default function App() {
         if (!isPro && session?.user?.id && session.user.id !== 'local-test-user') {
           const newCount = (profile?.edits_count || 0) + 1;
           await supabase.from('profiles').update({ edits_count: newCount }).eq('id', session.user.id);
-          fetchProfile(session.user.id);
+          fetchProfile(session.user.id, session.user.email);
         }
 
         setClips((prev) => [
@@ -866,7 +882,7 @@ export default function App() {
 
   // 3. ADMIN PANEL VIEW
   if (view === 'admin') {
-    return <AdminDashboard onBack={() => { setView('editor'); if (session) fetchProfile(session.user.id); }} />;
+    return <AdminDashboard onBack={() => { setView('editor'); if (session) fetchProfile(session.user.id, session.user.email); }} />;
   }
 
   // 4. EDITOR VIEW (Mandatory Login Guard)
