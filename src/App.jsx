@@ -93,7 +93,7 @@ export default function App() {
   // Export State
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
-  const [exportFormat, setExportFormat] = useState('mp4'); // 'webm' or 'mp4'
+  const [exportFormat, setExportFormat] = useState('mp4');
 
   // Dragging & Resizing Refs
   const isDraggingRef = useRef(false);
@@ -111,6 +111,37 @@ export default function App() {
   const recordedChunksRef = useRef([]);
 
   const isPro = profile?.plan === 'PRO';
+
+  const handleUpgradePro = () => {
+    const options = {
+      key: "rzp_test_YOUR_KEY_HERE", // Replace with your Razorpay Test Key ID
+      amount: 79900,
+      currency: "INR",
+      name: "CloudCut Studio",
+      description: "CloudCut Lifetime PRO Access",
+      image: "/favicon.svg",
+      handler: async function (response) {
+        if (response.razorpay_payment_id) {
+          if (session?.user?.id) {
+            await supabase
+              .from("profiles")
+              .update({ plan: "PRO" })
+              .eq("id", session.user.id);
+          }
+          alert("🎉 Payment Successful! PRO plan unlocked.");
+        }
+      },
+      prefill: {
+        email: session?.user?.email || "user@example.com",
+      },
+      theme: {
+        color: "#6366f1",
+      },
+    };
+
+    const razorpay = new window.Razorpay(options);
+    razorpay.open();
+  };
 
   const loadFont = (fontFamily) => {
     if (!fontFamily) return;
@@ -737,9 +768,17 @@ export default function App() {
               C
             </div>
             <span className="font-semibold text-xs text-white tracking-wide">CloudCut Editor</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${isPro ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-gray-800 text-gray-400 border-gray-700'}`}>
-              {isPro ? 'PRO Plan' : 'FREE Account'}
-            </span>
+            <button 
+              onClick={handleUpgradePro}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all cursor-pointer ${
+                isPro 
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 animate-pulse'
+              }`}
+              title="Click to Upgrade via Razorpay"
+            >
+              {isPro ? 'PRO Active ⭐' : 'Upgrade to PRO ⚡'}
+            </button>
           </div>
 
           <div className="h-4 w-[1px] bg-gray-700" />
