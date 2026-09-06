@@ -114,7 +114,7 @@ export default function App() {
 
   const handleUpgradePro = () => {
     const options = {
-      key: "rzp_test_YOUR_KEY_HERE", // Replace with your Razorpay Test Key ID
+      key: "rzp_test_YOUR_KEY_HERE",
       amount: 79900,
       currency: "INR",
       name: "CloudCut Studio",
@@ -175,6 +175,26 @@ export default function App() {
   const fetchProfile = async (id) => {
     const { data } = await supabase.from('profiles').select('*').eq('id', id).single();
     if (data) setProfile(data);
+  };
+
+  const handleDeleteClip = () => {
+    if (!clips.length) return;
+    const updated = clips.filter((_, idx) => idx !== activeClipIndex);
+    setClips(updated);
+    setActiveClipIndex(Math.max(0, activeClipIndex - 1));
+    if (videoRef.current) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  const handleStop = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
   };
 
   const handleLogout = async () => {
@@ -1046,15 +1066,25 @@ export default function App() {
         </main>
       </div>
 
-      {/* Multi-Track Timeline with Drag-and-Trim Handles */}
+      {/* Multi-Track Timeline with Playhead Scrubber & Delete Tool */}
       <footer className="h-48 border-t border-[#23242c] bg-[#121318] flex flex-col shrink-0">
         <div className="flex h-9 items-center justify-between border-b border-[#23242c] bg-[#16171d] px-4">
           <div className="flex items-center gap-2">
-            <button onClick={togglePlay} disabled={!clips.length} className="p-1 text-white hover:text-indigo-400">
+            {/* Play / Pause */}
+            <button onClick={togglePlay} disabled={!clips.length} className="p-1 text-white hover:text-indigo-400" title="Play / Pause">
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
+            {/* Stop */}
+            <button onClick={handleStop} disabled={!clips.length} className="p-1 text-gray-300 hover:text-red-400" title="Stop & Reset">
+              <RotateCcw size={15} />
+            </button>
+            {/* Split */}
             <button onClick={handleSplitClip} disabled={!clips.length} className="flex items-center gap-1 text-xs text-gray-300 hover:text-white px-2 py-0.5 rounded hover:bg-gray-800">
               <Scissors size={13} /> Split
+            </button>
+            {/* Delete Clip */}
+            <button onClick={handleDeleteClip} disabled={!clips.length} className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 px-2 py-0.5 rounded hover:bg-red-500/10">
+              <Trash2 size={13} /> Delete Clip
             </button>
           </div>
 
@@ -1068,14 +1098,35 @@ export default function App() {
           </div>
         </div>
 
-        {/* Timeline Tracks with Trim Sliders */}
-        <div ref={timelineRef} className="relative flex-1 overflow-x-auto p-3 bg-[#0d0e12] flex flex-col justify-center">
-          <div className="relative flex items-center gap-3">
+        {/* Timeline Tracks with Scrubbing Playhead */}
+        <div 
+          ref={timelineRef} 
+          onClick={(e) => {
+            if (!videoRef.current || !totalDuration) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+            videoRef.current.currentTime = ratio * (videoRef.current.duration || 1);
+          }}
+          className="relative flex-1 overflow-x-auto p-3 bg-[#0d0e12] flex flex-col justify-center cursor-pointer"
+        >
+          {/* Red Playhead Line */}
+          <div 
+            className="absolute top-0 bottom-0 w-[2px] bg-red-500 pointer-events-none z-20 flex flex-col items-center"
+            style={{ 
+              left: `${totalDuration ? (currentTime / totalDuration) * 100 : 0}%`,
+              transition: isPlaying ? 'none' : 'left 0.1s linear'
+            }}
+          >
+            <div className="w-2.5 h-2.5 bg-red-500 rotate-45 -mt-1 rounded-[1px]" />
+          </div>
+
+          <div className="relative flex items-center gap-3 z-10">
             {clips.map((clip, idx) => (
               <div
                 key={clip.id}
-                onClick={() => setActiveClipIndex(idx)}
-                className={`relative h-14 min-w-[240px] rounded-lg border flex items-center justify-between px-2 transition ${activeClipIndex === idx ? 'border-amber-400 bg-amber-500/10 text-white' : 'border-gray-800 bg-[#191a20] text-gray-400'}`}
+                onClick={(e) => { e.stopPropagation(); setActiveClipIndex(idx); }}
+                className={`relative h-14 min-w-[240px] rounded-lg border flex items-center justify-between px-2 transition ${activeClipIndex === idx ? 'border-amber-400 bg-amber-500/10 text-white shadow-lg' : 'border-gray-800 bg-[#191a20] text-gray-400'}`}
               >
                 <button
                   onClick={(e) => { e.stopPropagation(); handleUpdateTrim(clip.id, 'start', 0.5); }}
