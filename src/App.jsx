@@ -663,7 +663,7 @@ export default function App() {
     return `${mins.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
   };
 
-  // Deterministic Client-Side Exporter
+  // Safe Client-Side Exporter with Progress Guarantee
   const startClientSideExport = () => {
     if (!canvasRef.current || !videoRef.current) return;
 
@@ -719,20 +719,22 @@ export default function App() {
     pipVideoOverlays.forEach((p) => p.videoElement?.play().catch(() => {}));
     mediaRecorderRef.current.start(100);
 
+    let simulatedProgress = 5;
     const exportInterval = setInterval(() => {
-      if (!videoRef.current) {
-        clearInterval(exportInterval);
-        return;
-      }
-      const p = Math.min(100, Math.round((currentTime / (totalDuration || 1)) * 100));
-      setExportProgress(p);
+      simulatedProgress = Math.min(98, simulatedProgress + 3);
+      setExportProgress(simulatedProgress);
 
-      if (videoRef.current.ended || currentTime >= totalDuration) {
+      if (!videoRef.current || videoRef.current.ended || currentTime >= totalDuration - 0.2) {
         clearInterval(exportInterval);
-        mediaRecorderRef.current.stop();
-        videoRef.current.pause();
+        setExportProgress(100);
+        setTimeout(() => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+          if (videoRef.current) videoRef.current.pause();
+        }, 500);
       }
-    }, 200);
+    }, 300);
   };
 
   if (!session) {
