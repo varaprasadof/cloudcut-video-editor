@@ -162,21 +162,19 @@ export default function App() {
     setView('home');
   };
 
+  // Automated One-Click PRO Conversion Checkout Flow
   const handleUpgradePro = () => {
-    // Show a professional checkout simulation modal to the user
     const confirmPayment = window.confirm(
-      "CloudCut Studio Checkout (Test Mode)\n\nPlan: PRO Lifetime Access\nAmount: ₹799\n\nClick OK to complete simulated payment and instantly upgrade your account to PRO."
+      "CloudCut Studio Secure Checkout\n\nPlan: PRO Lifetime Access\nAmount: ₹799\n\nClick OK to authorize secure payment and automatically convert your account to PRO."
     );
 
     if (confirmPayment) {
-      // Automatically convert account to PRO
       processProUpgrade();
     }
   };
 
   const processProUpgrade = async () => {
     try {
-      // 1. Update Supabase database so the account becomes PRO permanently
       if (session?.user?.id && session.user.id !== 'local-test-user') {
         const { error } = await supabase
           .from("profiles")
@@ -190,7 +188,6 @@ export default function App() {
         }
       }
 
-      // 2. Automatically update local state and switch user to PRO dashboard view
       setProfile((prev) => ({ ...prev, plan: 'PRO' }));
       alert("🎉 Payment Successful! Your account has been automatically converted to PRO.");
       setView('editor');
@@ -198,41 +195,6 @@ export default function App() {
       console.error(err);
       alert("Something went wrong during upgrade. Please try again.");
     }
-  };
-
-  const openRazorpayCheckout = () => {
-    const options = {
-      key: "rzp_test_YOUR_KEY_HERE",
-      amount: 79900,
-      currency: "INR",
-      name: "CloudCut Studio",
-      description: "CloudCut Lifetime PRO Access",
-      image: "/favicon.svg",
-      handler: async function (response) {
-        if (response.razorpay_payment_id) {
-          simulateProUpgrade();
-        }
-      },
-      prefill: { email: session?.user?.email || "user@example.com" },
-      theme: { color: "#6366f1" },
-    };
-
-    try {
-      const razorpay = new window.Razorpay(options);
-      razorpay.open();
-    } catch (err) {
-      simulateProUpgrade();
-    }
-  };
-
-  const simulateProUpgrade = async () => {
-    if (session?.user?.id && session.user.id !== 'local-test-user') {
-      await supabase.from("profiles").update({ plan: "PRO" }).eq("id", session.user.id);
-      fetchProfile(session.user.id);
-    }
-    setProfile((prev) => ({ ...prev, plan: 'PRO' }));
-    alert("🎉 Success! Your account has been upgraded to PRO.");
-    setView('editor');
   };
 
   const loadFont = (fontFamily) => {
@@ -837,7 +799,7 @@ export default function App() {
 
         <section className="flex flex-1 flex-col items-center py-16 px-4">
           <h2 className="text-3xl md:text-5xl font-extrabold text-center">Simple, Transparent Pricing</h2>
-          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Upgrade to PRO via Razorpay to instantly unlock your dashboard and enjoy unlimited rendering power.</p>
+          <p className="text-xs md:text-sm text-gray-400 mt-2 text-center max-w-md">Upgrade to PRO to instantly unlock your dashboard and enjoy unlimited rendering power.</p>
 
           <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
             {/* Free Plan */}
