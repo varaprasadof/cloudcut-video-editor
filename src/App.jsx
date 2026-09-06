@@ -4,7 +4,7 @@ import AdminDashboard from './AdminDashboard';
 import { 
   FolderPlus, Video, Type, Download, Play, Pause, Scissors, LogOut, 
   ShieldAlert, RotateCcw, Trash2, Check, ZoomIn, ZoomOut, Music, Film,
-  Wand2, Subtitles, Mic, Palette, Save, FolderOpen, Crown, User, Lock, Sparkles, CheckCircle2
+  Wand2, Subtitles, Mic, Palette, Save, FolderOpen, Crown, Lock, Sparkles, CheckCircle2
 } from 'lucide-react';
 
 const TEXT_TEMPLATES = [
@@ -131,27 +131,40 @@ export default function App() {
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    if (isSignUp) {
-      const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-      if (error) alert(error.message);
-      else {
-        if (data?.user) {
-          await supabase.from('profiles').insert([{ id: data.user.id, email: authEmail, plan: 'FREE', edits_count: 0 }]);
-          fetchProfile(data.user.id);
+    try {
+      if (isSignUp) {
+        const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+        if (error) {
+          alert(`Signup Error: ${error.message}`);
+          return;
         }
-        alert('Signed up successfully!');
+        const userId = data?.user?.id;
+        if (userId) {
+          await supabase.from('profiles').upsert([
+            { id: userId, email: authEmail, plan: 'FREE', edits_count: 0, role: 'user' }
+          ], { onConflict: 'id' });
+          setSession(data.session);
+          await fetchProfile(userId);
+        }
+        alert('Account created successfully! Welcome to CloudCut Studio.');
         setShowAuthModal(false);
         setView('editor');
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+        if (error) {
+          alert(`Login Error: ${error.message}`);
+          return;
+        }
+        if (data?.session) {
+          setSession(data.session);
+          await fetchProfile(data.user.id);
+          setShowAuthModal(false);
+          setView('editor');
+        }
       }
-    } else {
-      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-      if (error) alert(error.message);
-      else {
-        setSession(data.session);
-        fetchProfile(data.user.id);
-        setShowAuthModal(false);
-        setView('editor');
-      }
+    } catch (err) {
+      console.error(err);
+      alert('Network or Supabase connection issue.');
     }
   };
 
@@ -231,13 +244,11 @@ export default function App() {
       const url = URL.createObjectURL(file);
       tempVideo.src = url;
       tempVideo.onloadedmetadata = async () => {
-        // Enforce 1-minute limit for Free users
         if (!isPro && tempVideo.duration > 60) {
           alert('Free users can only edit videos up to 1 minute long. Upgrade to PRO for unlimited length!');
           return;
         }
-        // Enforce 3 edits limit for Free users
-        if (!isPro && profile?.edits_count >= 3) {
+        if (!isPro && (profile?.edits_count || 0) >= 3) {
           alert('You have reached your 3 free video edits limit! Please upgrade to PRO for unlimited editing.');
           setView('pricing');
           return;
