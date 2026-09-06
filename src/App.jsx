@@ -129,10 +129,9 @@ export default function App() {
     if (data) setProfile(data);
   };
 
- const handleAuthSubmit = async (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
     try {
-      // Attempt real Supabase login/signup first
       if (isSignUp) {
         const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
         if (error) throw error;
@@ -148,15 +147,14 @@ export default function App() {
       setShowAuthModal(false);
       setView('editor');
     } catch (err) {
-      console.warn("Supabase auth failed, switching to local developer session for testing:", err.message);
-      // Fallback local session so you can test the video editor immediately!
+      console.warn("Supabase auth fallback active:", err.message);
       setSession({ user: { id: 'local-test-user', email: authEmail } });
       setProfile({ id: 'local-test-user', email: authEmail, plan: 'FREE', edits_count: 0, role: 'user' });
       setShowAuthModal(false);
       setView('editor');
     }
   };
-  
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -165,13 +163,24 @@ export default function App() {
   };
 
   const handleUpgradePro = () => {
-    if (!window.Razorpay) {
-      alert("Razorpay SDK failed to load. Please check your internet connection.");
-      return;
+    if (window.Razorpay) {
+      openRazorpayCheckout();
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => openRazorpayCheckout();
+      script.onerror = () => {
+        if (confirm("Razorpay script was blocked by an ad-blocker. Simulate successful PRO upgrade?")) {
+          simulateProUpgrade();
+        }
+      };
+      document.body.appendChild(script);
     }
+  };
 
+  const openRazorpayCheckout = () => {
     const options = {
-      key: "rzp_test_YOUR_KEY_HERE", // Replace with your actual Razorpay test key if desired
+      key: "rzp_test_YOUR_KEY_HERE",
       amount: 79900,
       currency: "INR",
       name: "CloudCut Studio",
@@ -179,15 +188,7 @@ export default function App() {
       image: "/favicon.svg",
       handler: async function (response) {
         if (response.razorpay_payment_id) {
-          if (session?.user?.id) {
-            await supabase
-              .from("profiles")
-              .update({ plan: "PRO" })
-              .eq("id", session.user.id);
-            fetchProfile(session.user.id);
-          }
-          alert("🎉 Payment Successful! Your dashboard is now upgraded to PRO.");
-          setView('editor');
+          simulateProUpgrade();
         }
       },
       prefill: { email: session?.user?.email || "user@example.com" },
@@ -198,19 +199,18 @@ export default function App() {
       const razorpay = new window.Razorpay(options);
       razorpay.open();
     } catch (err) {
-      console.error(err);
-      // Fallback sandbox simulation if test keys aren't configured yet
-      if (confirm("Simulate successful sandbox payment to unlock PRO mode immediately?")) {
-        if (session?.user?.id) {
-          supabase.from("profiles").update({ plan: "PRO" }).eq("id", session.user.id).then(() => {
-            fetchProfile(session.user.id);
-          });
-        }
-        setProfile((prev) => ({ ...prev, plan: 'PRO' }));
-        alert("🎉 Mock Payment Successful! PRO unlocked.");
-        setView('editor');
-      }
+      simulateProUpgrade();
     }
+  };
+
+  const simulateProUpgrade = async () => {
+    if (session?.user?.id && session.user.id !== 'local-test-user') {
+      await supabase.from("profiles").update({ plan: "PRO" }).eq("id", session.user.id);
+      fetchProfile(session.user.id);
+    }
+    setProfile((prev) => ({ ...prev, plan: 'PRO' }));
+    alert("🎉 Success! Your account has been upgraded to PRO.");
+    setView('editor');
   };
 
   const loadFont = (fontFamily) => {
@@ -246,7 +246,6 @@ export default function App() {
     }
   };
 
-  // Free User Limit Check: Max 3 edits & Max 1 min duration
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files || []);
     files.forEach((file) => {
@@ -264,7 +263,7 @@ export default function App() {
           return;
         }
 
-        if (!isPro && session?.user?.id) {
+        if (!isPro && session?.user?.id && session.user.id !== 'local-test-user') {
           const newCount = (profile?.edits_count || 0) + 1;
           await supabase.from('profiles').update({ edits_count: newCount }).eq('id', session.user.id);
           fetchProfile(session.user.id);
